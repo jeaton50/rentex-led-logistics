@@ -1,0 +1,3086 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logistics Optimizer - Regional Equipment Management</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #8B1C1C;
+            --primary-light: #B71C1C;
+            --secondary: #D32F2F;
+            --accent-1: #FF5252;
+            --accent-2: #FF8A80;
+            --bg-dark: #2C0A0A;
+            --bg-medium: #4A1414;
+            --bg-light: #6E2020;
+            --text-primary: #FFFFFF;
+            --text-secondary: #FFB3B3;
+            --border: #8B4545;
+            --success: #4CAF50;
+            --warning: #FFC107;
+            --error: #F44336;
+            --table-header: #8B1C1C;
+            --table-row-light: #FFE5E5;
+            --table-row-dark: #FFCCCC;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: linear-gradient(135deg, var(--bg-dark) 0%, var(--bg-medium) 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Background Pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                repeating-linear-gradient(90deg, rgba(255,200,200,0.02) 0px, transparent 1px, transparent 40px, rgba(255,200,200,0.02) 41px),
+                repeating-linear-gradient(0deg, rgba(255,200,200,0.02) 0px, transparent 1px, transparent 40px, rgba(255,200,200,0.02) 41px);
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        #root {
+            position: relative;
+            z-index: 1;
+        }
+
+        .app-container {
+            max-width: 1800px;
+            margin: 0 auto;
+            padding: 2rem;
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+            border-radius: 16px;
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 100%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.3; }
+            50% { transform: scale(1.1); opacity: 0.5; }
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .header h1 {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            letter-spacing: -1px;
+        }
+
+        .header-subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .header-badges {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .badge {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .tab {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid var(--border);
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .tab:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .tab.active {
+            background: var(--primary-light);
+            border-color: var(--secondary);
+            box-shadow: 0 4px 16px rgba(139, 28, 28, 0.4);
+        }
+
+        /* Cards */
+        .card {
+            background: rgba(27, 38, 59, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            border-color: var(--primary-light);
+        }
+
+        .card-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--secondary);
+        }
+
+        /* File Upload */
+        .file-upload-zone {
+            border: 3px dashed var(--border);
+            border-radius: 16px;
+            padding: 4rem 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .file-upload-zone:hover,
+        .file-upload-zone.drag-over {
+            border-color: var(--secondary);
+            background: rgba(211, 47, 47, 0.1);
+            transform: scale(1.02);
+        }
+
+        .file-upload-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.6;
+        }
+
+        .file-name {
+            color: var(--success);
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+            margin-top: 1rem;
+            padding: 0.5rem 1rem;
+            background: rgba(76, 175, 80, 0.1);
+            border-radius: 8px;
+            display: inline-block;
+        }
+
+        /* Buttons */
+        .btn {
+            background: var(--primary-light);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-family: 'Outfit', sans-serif;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background: var(--secondary);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(183, 28, 28, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-success {
+            background: var(--success);
+        }
+
+        .btn-success:hover {
+            background: #05c497;
+        }
+
+        .btn-warning {
+            background: var(--accent-1);
+        }
+
+        .btn-warning:hover {
+            background: #ff5722;
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-input,
+        .form-select {
+            width: 100%;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.3s ease;
+        }
+
+        /* Dropdown options styling for visibility */
+        .form-select option {
+            background: #FFFFFF;
+            color: #000000;
+            padding: 0.5rem;
+        }
+
+        .form-select option:hover,
+        .form-select option:checked {
+            background: #2196F3;
+            color: #FFFFFF;
+        }
+
+        .form-input:focus,
+        .form-select:focus {
+            outline: none;
+            border-color: var(--secondary);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        /* Table */
+        .table-container {
+            overflow-x: auto;
+            border-radius: 12px;
+            margin-top: 1rem;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+        }
+
+        .data-table thead {
+            background: var(--primary);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .data-table th {
+            padding: 1rem;
+            text-align: left;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 0.85rem;
+            border-bottom: 2px solid var(--secondary);
+        }
+
+        .data-table td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s ease;
+        }
+
+        .data-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .data-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Region Tags */
+        .region-tag {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .region-1 {
+            background: rgba(255, 82, 82, 0.2);
+            color: var(--accent-1);
+            border: 1px solid var(--accent-1);
+        }
+
+        .region-2 {
+            background: rgba(255, 138, 128, 0.2);
+            color: var(--accent-2);
+            border: 1px solid var(--accent-2);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, rgba(139, 28, 28, 0.1) 0%, rgba(74, 20, 20, 0.1) 100%);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            border-color: var(--secondary);
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--secondary);
+        }
+
+        .stat-unit {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-left: 0.5rem;
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            height: 12px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-light), var(--secondary));
+            transition: width 0.5s ease;
+            box-shadow: 0 0 10px rgba(183, 28, 28, 0.5);
+        }
+
+        /* Loading Spinner */
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--secondary);
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Toast Notifications */
+        .toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: var(--bg-medium);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+            animation: slideIn 0.3s ease-out;
+            max-width: 400px;
+            z-index: 1000;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success { border-left: 4px solid var(--success); }
+        .toast.error { border-left: 4px solid var(--error); }
+        .toast.warning { border-left: 4px solid var(--warning); }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .app-container {
+                padding: 1rem;
+            }
+
+            .header h1 {
+                font-size: 1.8rem;
+            }
+
+            .tabs {
+                flex-direction: column;
+            }
+
+            .tab {
+                width: 100%;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Scenario Cards */
+        .scenarios-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+
+        .scenario-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .scenario-card:hover {
+            border-color: var(--secondary);
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .scenario-card.selected {
+            background: rgba(183, 28, 28, 0.1);
+            border-color: var(--secondary);
+            box-shadow: 0 0 20px rgba(183, 28, 28, 0.3);
+        }
+
+        .scenario-title {
+            font-weight: 700;
+            font-size: 1.2rem;
+            margin-bottom: 0.5rem;
+            color: var(--secondary);
+        }
+
+        .scenario-description {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .checkbox-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+        }
+
+        .checkbox-wrapper input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+
+        /* Result Cards */
+        .result-section {
+            margin-top: 2rem;
+        }
+
+        .result-card {
+            background: linear-gradient(135deg, rgba(74, 20, 20, 0.2) 0%, rgba(139, 28, 28, 0.1) 100%);
+            border: 1px solid var(--primary-light);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .result-title {
+            font-size: 1.3rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .warehouse-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .warehouse-item {
+            background: rgba(255, 255, 255, 0.03);
+            border-left: 4px solid var(--secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: 150px 1fr 120px 120px 120px;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .warehouse-name {
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--secondary);
+        }
+
+        .warehouse-qty,
+        .warehouse-distance,
+        .warehouse-weight {
+            font-family: 'JetBrains Mono', monospace;
+            text-align: right;
+        }
+
+        /* Settings */
+        .settings-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+        }
+
+        .api-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .api-status.connected {
+            background: rgba(76, 175, 80, 0.2);
+            color: var(--success);
+        }
+
+        .api-status.disconnected {
+            background: rgba(239, 71, 111, 0.2);
+            color: var(--error);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: blink 2s infinite;
+        }
+
+        .status-dot.active {
+            background: var(--success);
+        }
+
+        .status-dot.inactive {
+            background: var(--error);
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Constants
+        const REGIONS = {
+            'Region 1 (East/South)': {
+                warehouses: ['CHICAGO', 'BOSTON', 'PHILADELPH', 'NEWYORK', 'ORLANDO', 'FTLAUDER', 'WDC', 'NASHVILLE'],
+                description: 'Eastern and Southern US warehouses'
+            },
+            'Region 2 (West/Central)': {
+                warehouses: ['ANAHEIM', 'SANFRAN', 'PHOENIX', 'LASVEGAS', 'DALLAS'],
+                description: 'Western and Central US warehouses'
+            }
+        };
+
+        const WAREHOUSE_COORDS = {
+            'ANAHEIM': [33.8366, -117.9143],
+            'BOSTON': [42.3601, -71.0589],
+            'CHICAGO': [41.8781, -87.6298],
+            'DALLAS': [32.7767, -96.7970],
+            'FTLAUDER': [26.1224, -80.1373],
+            'LASVEGAS': [36.1699, -115.1398],
+            'NASHVILLE': [36.1627, -86.7816],
+            'NEWYORK': [40.7128, -74.0060],
+            'ORLANDO': [28.5383, -81.3792],
+            'PHOENIX': [33.4484, -112.0740],
+            'PHILADELPH': [39.9526, -75.1652],
+            'SANFRAN': [37.7749, -122.4194],
+            'WDC': [38.9072, -77.0369]
+        };
+
+        const OPTIMIZATION_SCENARIOS = [
+            {
+                id: 'minimize_distance',
+                name: 'Minimize Distance',
+                description: 'Prioritize closest warehouses to reduce shipping distance',
+                icon: '📏'
+            },
+            {
+                id: 'minimize_trips',
+                name: 'Minimize Trips',
+                description: 'Pull from fewer warehouses to reduce trip count',
+                icon: '🚛'
+            },
+            {
+                id: 'balance_inventory',
+                name: 'Balance Inventory',
+                description: 'Distribute pulls evenly across warehouses',
+                icon: '⚖️'
+            },
+            {
+                id: 'prefer_local',
+                name: 'Prefer Local',
+                description: 'Maximize pulls from destination warehouse first',
+                icon: '🏠'
+            },
+            {
+                id: 'regional_priority',
+                name: 'Regional Priority',
+                description: 'Prioritize warehouses within the same region',
+                icon: '🌍'
+            },
+            {
+                id: 'preferred_source',
+                name: 'Preferred Source',
+                description: 'Prioritize specific warehouse after destination',
+                icon: '⭐',
+                requiresPreferred: true
+            }
+        ];
+
+        // Utility Functions
+        const calculateGeodesicDistance = (coord1, coord2) => {
+            const [lat1, lon1] = coord1;
+            const [lat2, lon2] = coord2;
+            const R = 3959; // Earth's radius in miles
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                     Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        };
+
+        const getWarehouseRegion = (warehouse) => {
+            for (const [regionName, regionData] of Object.entries(REGIONS)) {
+                if (regionData.warehouses.includes(warehouse)) {
+                    return regionName;
+                }
+            }
+            return 'Unknown';
+        };
+
+        // OpenRouteService Distance Calculator
+        const calculateRoadDistance = async (coord1, coord2, apiKey) => {
+            if (!apiKey || apiKey.length < 10) {
+                return calculateGeodesicDistance(coord1, coord2);
+            }
+
+            try {
+                const [lat1, lon1] = coord1;
+                const [lat2, lon2] = coord2;
+                
+                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': apiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        coordinates: [[lon1, lat1], [lon2, lat2]],
+                        format: 'json',
+                        units: 'mi'
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.routes && data.routes.length > 0) {
+                        return data.routes[0].summary.distance;
+                    }
+                }
+            } catch (error) {
+                console.log('Road distance API failed, using geodesic:', error);
+            }
+            
+            return calculateGeodesicDistance(coord1, coord2);
+        };
+
+        // Main App Component
+        const LogisticsOptimizer = () => {
+            const [activeTab, setActiveTab] = useState('upload');
+            const [excelFile, setExcelFile] = useState(null);
+            const [excelData, setExcelData] = useState(null);
+            const [destination, setDestination] = useState('');
+            const [equipment, setEquipment] = useState('');
+            const [quantity, setQuantity] = useState('');
+            const [selectedScenarios, setSelectedScenarios] = useState(['minimize_distance']);
+            const [results, setResults] = useState(null);
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [apiKey, setApiKey] = useState(localStorage.getItem('ors_api_key') || '');
+            const [useRoadDistances, setUseRoadDistances] = useState(false);
+            const [selectedRegion, setSelectedRegion] = useState('');
+            const [equipmentWeights, setEquipmentWeights] = useState({});
+            const [toast, setToast] = useState(null);
+            const [quoteFile, setQuoteFile] = useState(null);
+            const [quoteConversionLog, setQuoteConversionLog] = useState([]);
+            const [isConvertingQuote, setIsConvertingQuote] = useState(false);
+            const [equipmentFromQuote, setEquipmentFromQuote] = useState({});
+            const [equipmentDescriptions, setEquipmentDescriptions] = useState({});
+            const [selectedEquipmentItems, setSelectedEquipmentItems] = useState({});
+            const [batchOptimizationMode, setBatchOptimizationMode] = useState(false);
+            const [isBulkOptimizing, setIsBulkOptimizing] = useState(false);
+            const [bulkResults, setBulkResults] = useState(null);
+            const [preferredWarehouse, setPreferredWarehouse] = useState('');
+            const [availableDates, setAvailableDates] = useState([]);
+            const [selectedDates, setSelectedDates] = useState({ start: '', end: '' });
+            const [showDatePicker, setShowDatePicker] = useState(false);
+            const fileInputRef = useRef(null);
+            const quoteInputRef = useRef(null);
+            const quoteForOptimizerRef = useRef(null);
+
+            useEffect(() => {
+                // Load equipment weights from localStorage
+                const savedWeights = localStorage.getItem('equipment_weights');
+                if (savedWeights) {
+                    setEquipmentWeights(JSON.parse(savedWeights));
+                }
+            }, []);
+
+            useEffect(() => {
+                if (apiKey) {
+                    localStorage.setItem('ors_api_key', apiKey);
+                }
+            }, [apiKey]);
+
+            const showToast = (message, type = 'success') => {
+                setToast({ message, type });
+                setTimeout(() => setToast(null), 5000);
+            };
+
+            const handleFileUpload = (file) => {
+                if (!file) return;
+                
+                console.log('=== FILE UPLOAD START ===');
+                console.log('File name:', file.name);
+                console.log('File type:', file.type);
+                console.log('File size:', file.size, 'bytes');
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        console.log('File read complete, parsing...');
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        
+                        console.log('Workbook sheets:', workbook.SheetNames);
+                        
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null });
+                        
+                        console.log('Parsed rows:', jsonData.length);
+                        console.log('Row 1:', jsonData[0]?.slice(0, 10));
+                        console.log('Row 2:', jsonData[1]?.slice(0, 10));
+                        console.log('Row 3:', jsonData[2]?.slice(0, 10));
+                        console.log('Row 4:', jsonData[3]?.slice(0, 10));
+                        
+                        // Check if this is Rentex format (header at row 3)
+                        const isRentexFormat = jsonData[2] && 
+                            jsonData[2].some(cell => cell && String(cell).toLowerCase().includes('equipment')) &&
+                            jsonData[2].some(cell => cell && String(cell).toLowerCase().includes('location'));
+                        
+                        console.log('Rentex format detected:', isRentexFormat);
+                        
+                        setExcelData(jsonData);
+                        setExcelFile(file);
+                        
+                        console.log('✓ Excel data set in state');
+                        console.log('=== FILE UPLOAD END ===');
+                        
+                        if (isRentexFormat) {
+                            showToast(`✅ Rentex inventory file uploaded: ${file.name}`, 'success');
+                        } else {
+                            showToast(`✅ File uploaded: ${file.name}`, 'success');
+                        }
+                        setActiveTab('optimize');
+                    } catch (error) {
+                        console.error('=== FILE UPLOAD ERROR ===');
+                        console.error('Error:', error);
+                        console.error('Stack:', error.stack);
+                        showToast(`❌ Error reading file: ${error.message}`, 'error');
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
+
+            const handleDrop = (e) => {
+                e.preventDefault();
+                const file = e.dataTransfer.files[0];
+                if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
+                    handleFileUpload(file);
+                }
+            };
+
+            // Parse date string from Rentex format (e.g., " +1ThuJan 22 ", "Avail Today")
+            const parseDateString = (dateStr) => {
+                if (!dateStr || typeof dateStr !== 'string') return null;
+                
+                const trimmed = dateStr.trim();
+                if (trimmed === 'Avail Today') {
+                    return new Date(); // Today's date
+                }
+                
+                // Parse format like "+1ThuJan 22" or "+130SunMay 31"
+                const match = trimmed.match(/\+(\d+)\w{3}(\w{3})\s+(\d+)/);
+                if (!match) return null;
+                
+                const daysOffset = parseInt(match[1]);
+                const monthStr = match[2]; // "Jan", "Feb", etc.
+                const day = parseInt(match[3]);
+                
+                // Map month abbreviations
+                const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, 
+                               Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+                const month = months[monthStr];
+                
+                if (month === undefined) return null;
+                
+                // Create date based on today + offset
+                const today = new Date();
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + daysOffset);
+                
+                return targetDate;
+            };
+
+            const parseExcelData = () => {
+                console.log('=== PARSE INVENTORY DEBUG START ===');
+                
+                if (!excelData || excelData.length < 4) {
+                    console.error('FAILED: No Excel data or data too short');
+                    console.log('excelData exists:', !!excelData);
+                    console.log('excelData length:', excelData ? excelData.length : 0);
+                    return null;
+                }
+
+                // Detect Rentex format (header at row 3, with Equipment and Location columns)
+                const isRentexFormat = excelData[2] && 
+                    excelData[2].some(cell => cell && String(cell).toLowerCase().trim() === 'equipment') &&
+                    excelData[2].some(cell => cell && String(cell).toLowerCase().trim() === 'location');
+                
+                console.log('Format detected:', isRentexFormat ? 'Rentex' : 'Standard');
+                
+                if (isRentexFormat) {
+                    // Row 2 (index 1) contains dates
+                    // Row 3 (index 2) contains headers
+                    const dateRow = excelData[1] || [];
+                    const headers = excelData[2];
+                    console.log('Rentex date row:', dateRow.slice(0, 15));
+                    console.log('Rentex headers:', headers.slice(0, 15));
+                    
+                    // Find column indices
+                    const equipmentColIdx = headers.findIndex(h => 
+                        h && String(h).toLowerCase().trim() === 'equipment'
+                    );
+                    const locationColIdx = headers.findIndex(h => 
+                        h && String(h).toLowerCase().trim() === 'location'
+                    );
+                    
+                    // Find "Qty" columns with their corresponding dates
+                    const qtyColumnsWithDates = [];
+                    const extractedDates = [];
+                    
+                    headers.forEach((header, idx) => {
+                        if (header && String(header).toLowerCase().trim() === 'qty') {
+                            const dateInfo = dateRow[idx];
+                            const parsedDate = parseDateString(dateInfo);
+                            
+                            qtyColumnsWithDates.push({
+                                index: idx,
+                                dateStr: dateInfo ? String(dateInfo).trim() : '',
+                                date: parsedDate
+                            });
+                            
+                            if (parsedDate) {
+                                extractedDates.push({
+                                    dateStr: dateInfo ? String(dateInfo).trim() : '',
+                                    date: parsedDate
+                                });
+                            }
+                        }
+                    });
+                    
+                    console.log('Equipment column:', equipmentColIdx);
+                    console.log('Location column:', locationColIdx);
+                    console.log('Qty columns with dates:', qtyColumnsWithDates.length);
+                    console.log('Extracted dates:', extractedDates);
+                    
+                    // Store available dates for UI display
+                    setAvailableDates(extractedDates);
+                    
+                    if (equipmentColIdx === -1 || locationColIdx === -1) {
+                        console.error('FAILED: Required columns not found');
+                        showToast('❌ Could not find Equipment or Location columns', 'error');
+                        return null;
+                    }
+                    
+                    if (qtyColumnsWithDates.length === 0) {
+                        console.error('FAILED: No Qty columns found');
+                        showToast('❌ Could not find quantity columns', 'error');
+                        return null;
+                    }
+                    
+                    // Filter Qty columns by selected date range if specified
+                    let columnsToUse = qtyColumnsWithDates;
+                    if (selectedDates.start && selectedDates.end) {
+                        const startDate = new Date(selectedDates.start);
+                        const endDate = new Date(selectedDates.end);
+                        
+                        columnsToUse = qtyColumnsWithDates.filter(col => {
+                            if (!col.date) return false;
+                            return col.date >= startDate && col.date <= endDate;
+                        });
+                        
+                        console.log(`Date filter: ${selectedDates.start} to ${selectedDates.end}`);
+                        console.log(`Filtered to ${columnsToUse.length} columns from ${qtyColumnsWithDates.length}`);
+                    }
+                    
+                    if (columnsToUse.length === 0) {
+                        console.error('FAILED: No columns match date range');
+                        showToast('❌ No quantity columns found in selected date range', 'error');
+                        return null;
+                    }
+                    
+                    console.log('Using columns:', columnsToUse.map(c => c.index));
+                    
+                    // Group data by equipment and location
+                    const inventory = {};
+                    const warehouseColumns = {};
+                    let processedRows = 0;
+                    
+                    // Process data rows (starting from row 4, index 3)
+                    for (let i = 3; i < excelData.length; i++) {
+                        const row = excelData[i];
+                        if (!row || row.length === 0) continue;
+                        
+                        const equipment = row[equipmentColIdx];
+                        const location = row[locationColIdx];
+                        
+                        if (!equipment || !location) continue;
+                        
+                        // Get quantities from all selected date columns and find minimum
+                        const quantities = columnsToUse.map(col => {
+                            const qty = parseInt(row[col.index]) || 0;
+                            return qty;
+                        }).filter(q => !isNaN(q));
+                        
+                        // Use MINIMUM quantity across the date range (safest - guarantees availability)
+                        const qty = quantities.length > 0 ? Math.min(...quantities) : 0;
+                        
+                        const equipmentStr = String(equipment).trim();
+                        const locationStr = String(location).trim().toUpperCase();
+                        
+                        // Initialize equipment entry if needed
+                        if (!inventory[equipmentStr]) {
+                            inventory[equipmentStr] = {};
+                        }
+                        
+                        // Add/update quantity for this location
+                        if (!inventory[equipmentStr][locationStr]) {
+                            inventory[equipmentStr][locationStr] = 0;
+                        }
+                        inventory[equipmentStr][locationStr] += qty;
+                        
+                        // Track warehouse columns
+                        warehouseColumns[locationStr] = true;
+                        
+                        processedRows++;
+                    }
+                    
+                    console.log(`✓ Processed ${processedRows} rows`);
+                    console.log(`✓ Found ${Object.keys(inventory).length} unique equipment items`);
+                    console.log(`✓ Found ${Object.keys(warehouseColumns).length} warehouses:`, Object.keys(warehouseColumns));
+                    console.log('Sample equipment:', Object.keys(inventory).slice(0, 5));
+                    console.log('=== PARSE INVENTORY DEBUG END ===');
+                    
+                    return { 
+                        inventory, 
+                        warehouseColumns: Object.keys(warehouseColumns).reduce((acc, wh) => {
+                            acc[wh] = wh; // Just store warehouse name
+                            return acc;
+                        }, {})
+                    };
+                } else {
+                    // Standard format - first row is header
+                    const headers = excelData[0];
+                    console.log('Standard headers:', headers);
+                    
+                    const warehouseColumns = {};
+                    
+                    // Find warehouse columns
+                    headers.forEach((header, index) => {
+                        if (header && typeof header === 'string') {
+                            const warehouse = header.toUpperCase().trim();
+                            if (WAREHOUSE_COORDS[warehouse]) {
+                                warehouseColumns[warehouse] = index;
+                                console.log(`✓ Found warehouse: ${warehouse} at column ${index}`);
+                            }
+                        }
+                    });
+
+                    console.log('Warehouse columns found:', Object.keys(warehouseColumns).length);
+                    
+                    if (Object.keys(warehouseColumns).length === 0) {
+                        console.error('FAILED: No warehouse columns found');
+                        console.log('Looking for these warehouses:', Object.keys(WAREHOUSE_COORDS));
+                        console.log('Available headers:', headers.filter(h => h && typeof h === 'string'));
+                        showToast('❌ No warehouse columns found. Use Rentex format (Equipment + Location) or rename columns to: CHICAGO, BOSTON, etc.', 'error');
+                        return null;
+                    }
+
+                    // Find equipment column
+                    const equipmentColIndex = headers.findIndex(h => 
+                        h && h.toString().toLowerCase().includes('equipment')
+                    );
+
+                    console.log('Equipment column index:', equipmentColIndex);
+                    
+                    if (equipmentColIndex === -1) {
+                        console.error('FAILED: Equipment column not found in inventory');
+                        console.log('Available columns:', headers);
+                        showToast('❌ Equipment column not found in inventory file', 'error');
+                        return null;
+                    }
+
+                    console.log(`✓ Equipment column at index ${equipmentColIndex}`);
+
+                    // Parse inventory data
+                    const inventory = {};
+                    let equipmentCount = 0;
+                    
+                    for (let i = 1; i < excelData.length; i++) {
+                        const row = excelData[i];
+                        const equipmentName = row[equipmentColIndex];
+                        if (!equipmentName) continue;
+
+                        inventory[equipmentName] = {};
+                        Object.entries(warehouseColumns).forEach(([warehouse, colIndex]) => {
+                            const qty = parseInt(row[colIndex]) || 0;
+                            inventory[equipmentName][warehouse] = qty;
+                        });
+                        equipmentCount++;
+                    }
+
+                    console.log(`✓ Parsed ${equipmentCount} equipment items`);
+                    console.log('Sample equipment:', Object.keys(inventory).slice(0, 5));
+                    console.log('=== PARSE INVENTORY DEBUG END ===');
+
+                    return { inventory, warehouseColumns };
+                }
+            };
+
+            const loadQuoteForOptimizer = async (file) => {
+                if (!excelData) {
+                    showToast('⚠️ Please load inventory file first!', 'warning');
+                    return;
+                }
+
+                try {
+                    showToast('📋 Loading quote file...', 'success');
+                    
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    console.log('=== QUOTE LOADER DEBUG START ===');
+                    console.log('Available sheets:', workbook.SheetNames);
+                    
+                    // Look for 'Rental Items' sheet or use first sheet
+                    let sheetName = workbook.SheetNames[0];
+                    if (workbook.SheetNames.includes('Rental Items')) {
+                        sheetName = 'Rental Items';
+                    } else {
+                        const rentalSheet = workbook.SheetNames.find(name => 
+                            name.toLowerCase().includes('rental')
+                        );
+                        if (rentalSheet) sheetName = rentalSheet;
+                    }
+                    
+                    console.log('Using sheet:', sheetName);
+
+                    const sheet = workbook.Sheets[sheetName];
+                    
+                    // Try reading with and without header to debug
+                    const jsonData = XLSX.utils.sheet_to_json(sheet);
+                    const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+                    
+                    console.log('First 3 rows (raw):', rawData.slice(0, 3));
+                    console.log('First object (json):', jsonData[0]);
+
+                    if (!rawData || rawData.length === 0) {
+                        showToast('❌ File appears to be empty', 'error');
+                        return;
+                    }
+
+                    // The first row should be the header
+                    const headers = rawData[0];
+                    console.log('Headers detected:', headers);
+                    console.log('Header types:', headers.map(h => typeof h));
+
+                    if (!headers || headers.length === 0) {
+                        showToast('❌ Could not read file headers', 'error');
+                        return;
+                    }
+
+                    // Find equipment and quantity columns with flexible matching
+                    let equipmentColIdx = -1;
+                    let quantityColIdx = -1;
+                    let descriptionColIdx = -1;
+
+                    headers.forEach((header, idx) => {
+                        if (!header) return;
+                        
+                        const headerStr = String(header).toLowerCase().trim();
+                        console.log(`Column ${idx}: "${header}" -> "${headerStr}"`);
+                        
+                        // Equipment column - check if it contains "equipment" anywhere
+                        if (headerStr.includes('equipment') && equipmentColIdx === -1) {
+                            equipmentColIdx = idx;
+                            console.log(`✓ Found Equipment column at index ${idx}`);
+                        }
+                        
+                        // Description column
+                        if (headerStr.includes('description') && descriptionColIdx === -1) {
+                            descriptionColIdx = idx;
+                            console.log(`✓ Found Description column at index ${idx}`);
+                        }
+                        
+                        // Quantity column - check multiple variations
+                        if ((headerStr.includes('order') || 
+                             headerStr.includes('qty') || 
+                             headerStr.includes('quantity') || 
+                             headerStr.includes('need')) && quantityColIdx === -1) {
+                            quantityColIdx = idx;
+                            console.log(`✓ Found Quantity column at index ${idx}`);
+                        }
+                    });
+
+                    console.log('Equipment column index:', equipmentColIdx);
+                    console.log('Quantity column index:', quantityColIdx);
+
+                    // Fallback to positional columns based on typical format
+                    if (equipmentColIdx === -1) {
+                        // Try column positions: 0=Main, 1=Equipment, 2=Description, 3=Ordered
+                        if (headers.length >= 2) {
+                            console.log('Using positional fallback: Equipment at column 1');
+                            equipmentColIdx = 1;
+                        }
+                    }
+                    
+                    if (quantityColIdx === -1) {
+                        if (headers.length >= 4) {
+                            console.log('Using positional fallback: Quantity at column 3');
+                            quantityColIdx = 3;
+                        }
+                    }
+
+                    if (equipmentColIdx === -1) {
+                        const headersList = headers.filter(h => h).join(', ');
+                        console.error('FAILED: Could not find Equipment column');
+                        console.error('Available headers:', headersList);
+                        showToast(`❌ Equipment column not found. Available: ${headersList}`, 'error');
+                        return;
+                    }
+
+                    if (quantityColIdx === -1) {
+                        const headersList = headers.filter(h => h).join(', ');
+                        console.error('FAILED: Could not find Quantity column');
+                        console.error('Available headers:', headersList);
+                        showToast(`❌ Quantity column not found. Available: ${headersList}`, 'error');
+                        return;
+                    }
+
+                    console.log(`SUCCESS: Using Equipment col ${equipmentColIdx}, Quantity col ${quantityColIdx}`);
+                    if (descriptionColIdx !== -1) {
+                        console.log(`SUCCESS: Using Description col ${descriptionColIdx}`);
+                    }
+
+                    // Extract equipment, descriptions, and quantities (skip header row)
+                    const quoteEquipment = {};
+                    const quoteDescriptions = {};
+                    let processedRows = 0;
+
+                    for (let i = 1; i < rawData.length; i++) {
+                        const row = rawData[i];
+                        if (!row || row.length === 0 || row.every(cell => !cell)) continue;
+
+                        const equipmentName = row[equipmentColIdx];
+                        const qtyRaw = row[quantityColIdx];
+                        const description = descriptionColIdx !== -1 ? row[descriptionColIdx] : '';
+
+                        if (!equipmentName) continue;
+
+                        const equipmentStr = String(equipmentName).trim();
+                        const descriptionStr = description ? String(description).trim() : '';
+                        
+                        let qty = 0;
+                        if (typeof qtyRaw === 'number') {
+                            qty = Math.floor(Math.abs(qtyRaw));
+                        } else if (qtyRaw) {
+                            const numStr = String(qtyRaw).replace(/[^0-9.-]/g, '');
+                            qty = Math.floor(Math.abs(parseFloat(numStr) || 0));
+                        }
+
+                        if (equipmentStr && qty > 0) {
+                            if (quoteEquipment[equipmentStr]) {
+                                quoteEquipment[equipmentStr] += qty;
+                            } else {
+                                quoteEquipment[equipmentStr] = qty;
+                                quoteDescriptions[equipmentStr] = descriptionStr; // Store description
+                            }
+                            processedRows++;
+                            
+                            if (processedRows <= 5) {
+                                console.log(`Row ${i}: "${equipmentStr}" -> ${qty} (${descriptionStr})`);
+                            }
+                        }
+                    }
+
+                    console.log(`Processed ${processedRows} rows`);
+                    console.log('Unique equipment items:', Object.keys(quoteEquipment).length);
+
+                    if (Object.keys(quoteEquipment).length === 0) {
+                        showToast('⚠️ No equipment with quantities found in quote', 'warning');
+                        return;
+                    }
+
+                    // Match against inventory
+                    const parsedData = parseExcelData();
+                    if (!parsedData) {
+                        showToast('❌ Could not parse inventory data', 'error');
+                        return;
+                    }
+
+                    const availableEquipment = Object.keys(parsedData.inventory);
+                    console.log(`Inventory has ${availableEquipment.length} items`);
+                    
+                    const matched = {};
+                    const unmatched = [];
+                    let matchCount = 0;
+
+                    Object.entries(quoteEquipment).forEach(([quoteName, qty]) => {
+                        // Try exact match first
+                        if (availableEquipment.includes(quoteName)) {
+                            matched[quoteName] = qty;
+                            matchCount++;
+                        } else {
+                            // Try case-insensitive match
+                            const match = availableEquipment.find(inv => 
+                                inv.toLowerCase() === quoteName.toLowerCase()
+                            );
+                            if (match) {
+                                matched[match] = qty;
+                                matchCount++;
+                            } else {
+                                unmatched.push(quoteName);
+                            }
+                        }
+                    });
+
+                    console.log(`Matched ${matchCount} items`);
+                    if (unmatched.length > 0) {
+                        console.log('Unmatched items:', unmatched.slice(0, 10));
+                    }
+                    console.log('=== QUOTE LOADER DEBUG END ===');
+
+                    setEquipmentFromQuote(matched);
+                    setEquipmentDescriptions(quoteDescriptions);
+                    
+                    const message = `✅ Loaded ${processedRows} items from quote, matched ${matchCount} with inventory`;
+                    showToast(message, 'success');
+                    
+                    if (unmatched.length > 0 && unmatched.length <= 5) {
+                        setTimeout(() => {
+                            showToast(`⚠️ ${unmatched.length} items not in inventory: ${unmatched.slice(0, 3).join(', ')}...`, 'warning');
+                        }, 2000);
+                    } else if (unmatched.length > 5) {
+                        setTimeout(() => {
+                            showToast(`⚠️ ${unmatched.length} items from quote not found in inventory`, 'warning');
+                        }, 2000);
+                    }
+
+                } catch (error) {
+                    console.error('=== QUOTE LOADER ERROR ===');
+                    console.error('Error:', error);
+                    console.error('Stack:', error.stack);
+                    showToast(`❌ Error loading quote: ${error.message}`, 'error');
+                }
+            };
+
+            const bulkOptimizeAllQuoteItems = async () => {
+                // Get all equipment items from quote
+                const allItems = Object.entries(equipmentFromQuote).map(([equipmentName, quantity]) => ({
+                    name: equipmentName,
+                    quantity: quantity
+                }));
+
+                if (allItems.length === 0) {
+                    showToast('⚠️ No equipment items loaded from quote', 'warning');
+                    return;
+                }
+
+                if (!destination) {
+                    showToast('⚠️ Please select a destination warehouse', 'warning');
+                    return;
+                }
+
+                if (selectedScenarios.length === 0) {
+                    showToast('⚠️ Please select at least one optimization scenario', 'warning');
+                    return;
+                }
+
+                const parsedData = parseExcelData();
+                if (!parsedData) return;
+
+                setIsBulkOptimizing(true);
+                setBulkResults(null);
+
+                try {
+                    const destCoords = WAREHOUSE_COORDS[destination];
+                    const allResults = {};
+                    let processedCount = 0;
+                    let skippedCount = 0;
+
+                    showToast(`🔄 Bulk optimizing ${allItems.length} items from quote...`, 'success');
+
+                    // Calculate distances once (reuse for all items)
+                    const warehouseDistances = {};
+                    for (const warehouse of Object.keys(WAREHOUSE_COORDS)) {
+                        if (warehouse === destination) {
+                            warehouseDistances[warehouse] = 0;
+                        } else {
+                            const whCoords = WAREHOUSE_COORDS[warehouse];
+                            if (useRoadDistances && apiKey) {
+                                warehouseDistances[warehouse] = await calculateRoadDistance(destCoords, whCoords, apiKey);
+                                await new Promise(resolve => setTimeout(resolve, 100));
+                            } else {
+                                warehouseDistances[warehouse] = calculateGeodesicDistance(destCoords, whCoords);
+                            }
+                        }
+                    }
+
+                    // Optimize each item from quote
+                    for (let i = 0; i < allItems.length; i++) {
+                        const item = allItems[i];
+                        const inventory = parsedData.inventory[item.name];
+                        
+                        // Update progress
+                        if (i % 5 === 0 || i === allItems.length - 1) {
+                            showToast(`🔄 Processing ${i + 1}/${allItems.length}: ${item.name.substring(0, 30)}...`, 'success');
+                        }
+                        
+                        if (!inventory) {
+                            console.log(`Item "${item.name}" not found in inventory, skipping`);
+                            skippedCount++;
+                            continue;
+                        }
+
+                        const itemResults = {};
+                        for (const scenarioId of selectedScenarios) {
+                            const result = runOptimization(
+                                scenarioId,
+                                inventory,
+                                warehouseDistances,
+                                item.quantity,
+                                destination,
+                                selectedRegion,
+                                preferredWarehouse
+                            );
+                            itemResults[scenarioId] = result;
+                        }
+
+                        allResults[item.name] = {
+                            equipment: item.name,
+                            quantity: item.quantity,
+                            scenarios: itemResults
+                        };
+                        processedCount++;
+                    }
+
+                    setBulkResults({
+                        bulkMode: true,
+                        items: allResults,
+                        destination,
+                        distanceType: useRoadDistances ? 'Road' : 'Geodesic',
+                        itemCount: processedCount,
+                        skippedCount: skippedCount,
+                        totalItems: allItems.length
+                    });
+
+                    // Store in results as well for export
+                    setResults({
+                        bulkMode: true,
+                        items: allResults,
+                        destination,
+                        distanceType: useRoadDistances ? 'Road' : 'Geodesic',
+                        itemCount: processedCount
+                    });
+
+                    showToast(`✅ Bulk optimization complete! Processed ${processedCount} items${skippedCount > 0 ? `, skipped ${skippedCount}` : ''}`, 'success');
+                    setActiveTab('results');
+                } catch (error) {
+                    console.error('Bulk optimization error:', error);
+                    showToast(`❌ Optimization error: ${error.message}`, 'error');
+                }
+
+                setIsBulkOptimizing(false);
+            };
+
+            const optimizeLogistics = async () => {
+                if (!destination || !equipment || !quantity) {
+                    showToast('⚠️ Please fill in all fields', 'warning');
+                    return;
+                }
+
+                const parsedData = parseExcelData();
+                if (!parsedData) return;
+
+                setIsProcessing(true);
+                setResults(null);
+
+                try {
+                    const qty = parseInt(quantity);
+                    const inventory = parsedData.inventory[equipment];
+
+                    if (!inventory) {
+                        showToast(`❌ Equipment "${equipment}" not found in inventory`, 'error');
+                        setIsProcessing(false);
+                        return;
+                    }
+
+                    const destCoords = WAREHOUSE_COORDS[destination];
+                    const scenarioResults = {};
+
+                    // Calculate distances to all warehouses
+                    const warehouseDistances = {};
+                    for (const warehouse of Object.keys(WAREHOUSE_COORDS)) {
+                        if (warehouse === destination) {
+                            warehouseDistances[warehouse] = 0;
+                        } else {
+                            const whCoords = WAREHOUSE_COORDS[warehouse];
+                            if (useRoadDistances && apiKey) {
+                                warehouseDistances[warehouse] = await calculateRoadDistance(destCoords, whCoords, apiKey);
+                                await new Promise(resolve => setTimeout(resolve, 100)); // Rate limiting
+                            } else {
+                                warehouseDistances[warehouse] = calculateGeodesicDistance(destCoords, whCoords);
+                            }
+                        }
+                    }
+
+                    // Run each selected scenario
+                    for (const scenarioId of selectedScenarios) {
+                        const result = runOptimization(
+                            scenarioId,
+                            inventory,
+                            warehouseDistances,
+                            qty,
+                            destination,
+                            selectedRegion,
+                            preferredWarehouse
+                        );
+                        scenarioResults[scenarioId] = result;
+                    }
+
+                    setResults({
+                        scenarios: scenarioResults,
+                        equipment,
+                        quantity: qty,
+                        destination,
+                        distanceType: useRoadDistances ? 'Road' : 'Geodesic'
+                    });
+
+                    showToast('✅ Optimization complete!', 'success');
+                    setActiveTab('results');
+                } catch (error) {
+                    showToast(`❌ Optimization error: ${error.message}`, 'error');
+                }
+
+                setIsProcessing(false);
+            };
+
+            const runOptimization = (scenarioId, inventory, distances, qtyNeeded, dest, region, preferredWh = '') => {
+                const pulls = [];
+                let remaining = qtyNeeded;
+
+                // Filter warehouses by region if selected
+                let availableWarehouses = Object.entries(inventory)
+                    .filter(([wh, qty]) => qty > 0)
+                    .map(([wh, qty]) => ({
+                        warehouse: wh,
+                        available: qty,
+                        distance: distances[wh] || 0,
+                        region: getWarehouseRegion(wh)
+                    }));
+
+                if (region) {
+                    availableWarehouses = availableWarehouses.filter(wh => 
+                        REGIONS[region].warehouses.includes(wh.warehouse)
+                    );
+                }
+
+                // Sort based on scenario
+                switch (scenarioId) {
+                    case 'minimize_distance':
+                        availableWarehouses.sort((a, b) => a.distance - b.distance);
+                        break;
+                    case 'minimize_trips':
+                        availableWarehouses.sort((a, b) => b.available - a.available);
+                        break;
+                    case 'balance_inventory':
+                        availableWarehouses.sort((a, b) => a.available - b.available);
+                        break;
+                    case 'prefer_local':
+                        availableWarehouses.sort((a, b) => {
+                            if (a.warehouse === dest) return -1;
+                            if (b.warehouse === dest) return 1;
+                            return a.distance - b.distance;
+                        });
+                        break;
+                    case 'regional_priority':
+                        const destRegion = getWarehouseRegion(dest);
+                        availableWarehouses.sort((a, b) => {
+                            if (a.region === destRegion && b.region !== destRegion) return -1;
+                            if (b.region === destRegion && a.region !== destRegion) return 1;
+                            return a.distance - b.distance;
+                        });
+                        break;
+                    case 'preferred_source':
+                        // Priority: Destination → Preferred Warehouse → Others by max availability
+                        availableWarehouses.sort((a, b) => {
+                            if (a.warehouse === dest) return -1;
+                            if (b.warehouse === dest) return 1;
+                            if (a.warehouse === preferredWh) return -1;
+                            if (b.warehouse === preferredWh) return 1;
+                            // For remaining warehouses, sort by availability (descending) then distance
+                            if (a.available !== b.available) return b.available - a.available;
+                            return a.distance - b.distance;
+                        });
+                        break;
+                }
+
+                // Allocate quantities
+                for (const wh of availableWarehouses) {
+                    if (remaining <= 0) break;
+
+                    const pullQty = Math.min(remaining, wh.available);
+                    const weight = (equipmentWeights[equipment] || 0) * pullQty;
+
+                    pulls.push({
+                        warehouse: wh.warehouse,
+                        quantity: pullQty,
+                        available: wh.available,
+                        distance: Math.round(wh.distance),
+                        region: wh.region,
+                        weight: weight
+                    });
+
+                    remaining -= pullQty;
+                }
+
+                const totalDistance = pulls.reduce((sum, p) => sum + (p.distance * p.quantity), 0);
+                const totalWeight = pulls.reduce((sum, p) => sum + p.weight, 0);
+                const totalTrips = pulls.length;
+
+                return {
+                    pulls,
+                    totalDistance: Math.round(totalDistance),
+                    avgDistance: pulls.length > 0 ? Math.round(totalDistance / qtyNeeded) : 0,
+                    totalWeight: Math.round(totalWeight),
+                    totalTrips,
+                    fulfilled: remaining === 0,
+                    shortfall: remaining > 0 ? remaining : 0
+                };
+            };
+
+            const exportToExcel = () => {
+                if (!results) return;
+
+                const wb = XLSX.utils.book_new();
+
+                // Check if this is bulk mode
+                const isBulkMode = results.bulkMode || results.items;
+
+                if (isBulkMode) {
+                    // BULK MODE EXPORT - One sheet per SCENARIO showing all equipment
+                    
+                    // Get all unique scenario IDs from first item
+                    const firstItem = Object.values(results.items)[0];
+                    const scenarioIds = Object.keys(firstItem.scenarios);
+                    
+                    console.log('=== BULK EXPORT DEBUG ===');
+                    console.log('Number of scenarios:', scenarioIds.length);
+                    console.log('Scenario IDs:', scenarioIds);
+                    console.log('Number of equipment items:', Object.keys(results.items).length);
+                    
+                    // Create a sheet for each scenario
+                    scenarioIds.forEach(scenarioId => {
+                        const scenarioName = OPTIMIZATION_SCENARIOS.find(s => s.id === scenarioId)?.name || scenarioId;
+                        
+                        console.log(`Creating sheet for scenario: ${scenarioName} (${scenarioId})`);
+                        
+                        const sheetData = [
+                            ['Equipment', 'Description', 'Requested Qty', 'Equipment Location', 'Warehouse Region', 'Pulled Qty', 
+                             'Available', 'Shortfall', 'Distance (mi)', 'Weight per Unit (lbs)', 'Total Weight (lbs)', 'Destination']
+                        ];
+                        
+                        // Add data for each equipment item
+                        Object.entries(results.items).forEach(([equipmentName, itemResult]) => {
+                            const scenarioResult = itemResult.scenarios[scenarioId];
+                            
+                            if (scenarioResult && scenarioResult.pulls && scenarioResult.pulls.length > 0) {
+                                // Add a row for each pull - showing equipment name on EVERY row
+                                scenarioResult.pulls.forEach(pull => {
+                                    sheetData.push([
+                                        equipmentName,
+                                        equipmentDescriptions[equipmentName] || '', // Description from quote
+                                        itemResult.quantity,
+                                        pull.warehouse,
+                                        pull.region,
+                                        pull.quantity,
+                                        pull.available,
+                                        scenarioResult.fulfilled ? '' : scenarioResult.shortfall, // Shortfall after Available
+                                        pull.distance,
+                                        pull.quantity > 0 ? Math.round(pull.weight / pull.quantity * 100) / 100 : 0,
+                                        pull.weight,
+                                        results.destination
+                                    ]);
+                                });
+                                
+                                // If not fulfilled, add a SHORTFALL row
+                                if (!scenarioResult.fulfilled && scenarioResult.shortfall > 0) {
+                                    sheetData.push([
+                                        equipmentName,
+                                        equipmentDescriptions[equipmentName] || '',
+                                        itemResult.quantity,
+                                        'SHORTFALL',
+                                        '',
+                                        '',
+                                        '',
+                                        `${scenarioResult.shortfall} ${equipmentName}`, // Shortfall after Available
+                                        '',
+                                        0,
+                                        0,
+                                        results.destination
+                                    ]);
+                                }
+                            } else {
+                                // No pulls for this item - show as complete shortfall
+                                sheetData.push([
+                                    equipmentName,
+                                    equipmentDescriptions[equipmentName] || '',
+                                    itemResult.quantity,
+                                    'SHORTFALL',
+                                    '',
+                                    '',
+                                    '',
+                                    `${itemResult.quantity} ${equipmentName}`, // Shortfall after Available
+                                    '',
+                                    0,
+                                    0,
+                                    results.destination
+                                ]);
+                            }
+                        });
+                        
+                        const sheet = XLSX.utils.aoa_to_sheet(sheetData);
+                        
+                        // Highlight SHORTFALL rows in red
+                        const range = XLSX.utils.decode_range(sheet['!ref']);
+                        let shortfallRowCount = 0;
+                        for (let R = range.s.r + 1; R <= range.e.r; R++) { // Skip header row
+                            const equipmentLocationCell = sheet[XLSX.utils.encode_cell({r: R, c: 3})]; // Column D (Equipment Location)
+                            if (equipmentLocationCell && equipmentLocationCell.v === 'SHORTFALL') {
+                                shortfallRowCount++;
+                                // Highlight all cells in this row with red background
+                                for (let C = range.s.c; C <= range.e.c; C++) {
+                                    const cellAddress = XLSX.utils.encode_cell({r: R, c: C});
+                                    if (!sheet[cellAddress]) continue;
+                                    
+                                    // Set cell style with red background (xlsx-js-style format)
+                                    sheet[cellAddress].s = {
+                                        fill: {
+                                            patternType: "solid",
+                                            fgColor: { rgb: "FFCCCC" } // Light red background
+                                        },
+                                        font: {
+                                            color: { rgb: "990000" }, // Dark red text
+                                            bold: true
+                                        },
+                                        alignment: {
+                                            vertical: "center",
+                                            horizontal: "left"
+                                        }
+                                    };
+                                }
+                            }
+                        }
+                        
+                        if (shortfallRowCount > 0) {
+                            console.log(`  Applied red highlighting to ${shortfallRowCount} shortfall rows`);
+                        }
+                        
+                        // Auto-size columns
+                        const colWidths = sheetData.reduce((widths, row) => {
+                            row.forEach((cell, idx) => {
+                                const cellWidth = String(cell || '').length;
+                                widths[idx] = Math.max(widths[idx] || 10, cellWidth + 2);
+                            });
+                            return widths;
+                        }, []);
+                        sheet['!cols'] = colWidths.map(w => ({ wch: w }));
+                        
+                        console.log(`Sheet "${scenarioName}" has ${sheetData.length - 1} data rows`);
+                        XLSX.utils.book_append_sheet(wb, sheet, scenarioName.substring(0, 31));
+                    });
+                    
+                    console.log('Total sheets created:', wb.SheetNames.length);
+                    console.log('Sheet names:', wb.SheetNames);
+
+                } else {
+                    // SINGLE MODE EXPORT - Keep original format
+                    const summaryData = [
+                        ['Logistics Optimization Results'],
+                        ['Equipment:', results.equipment || 'N/A'],
+                        ['Quantity Needed:', results.quantity || 'N/A'],
+                        ['Destination:', results.destination],
+                        ['Distance Type:', results.distanceType],
+                        ['Region Filter:', selectedRegion || 'None'],
+                        ['Preferred Warehouse:', preferredWarehouse || 'None'],
+                        ['Date Range:', selectedDates.start && selectedDates.end ? 
+                            `${selectedDates.start} to ${selectedDates.end}` : 'All Dates'],
+                        [],
+                        ['Scenario', 'Total Distance', 'Avg Distance', 'Total Weight (lbs)', 'Trips', 'Status']
+                    ];
+
+                    Object.entries(results.scenarios).forEach(([scenarioId, result]) => {
+                        const scenarioName = OPTIMIZATION_SCENARIOS.find(s => s.id === scenarioId)?.name || scenarioId;
+                        summaryData.push([
+                            scenarioName,
+                            result.totalDistance,
+                            result.avgDistance,
+                            result.totalWeight,
+                            result.totalTrips,
+                            result.fulfilled ? 'Fulfilled' : `Short ${result.shortfall}`
+                        ]);
+                    });
+
+                    const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+                    
+                    // Auto-size columns for summary sheet
+                    const summaryColWidths = summaryData.reduce((widths, row) => {
+                        row.forEach((cell, idx) => {
+                            const cellWidth = String(cell || '').length;
+                            widths[idx] = Math.max(widths[idx] || 10, cellWidth + 2);
+                        });
+                        return widths;
+                    }, []);
+                    summarySheet['!cols'] = summaryColWidths.map(w => ({ wch: w }));
+                    
+                    XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+
+                    // Create detail sheets for each scenario
+                    Object.entries(results.scenarios).forEach(([scenarioId, result]) => {
+                        const scenarioName = OPTIMIZATION_SCENARIOS.find(s => s.id === scenarioId)?.name || scenarioId;
+                        const detailData = [
+                            ['Warehouse', 'Quantity', 'Available', 'Distance (mi)', 'Weight (lbs)', 'Region'],
+                            ...result.pulls.map(p => [
+                                p.warehouse,
+                                p.quantity,
+                                p.available,
+                                p.distance,
+                                p.weight,
+                                p.region
+                            ])
+                        ];
+
+                        const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
+                        
+                        // Auto-size columns for detail sheet
+                        const detailColWidths = detailData.reduce((widths, row) => {
+                            row.forEach((cell, idx) => {
+                                const cellWidth = String(cell || '').length;
+                                widths[idx] = Math.max(widths[idx] || 10, cellWidth + 2);
+                            });
+                            return widths;
+                        }, []);
+                        detailSheet['!cols'] = detailColWidths.map(w => ({ wch: w }));
+                        
+                        XLSX.utils.book_append_sheet(wb, detailSheet, scenarioName.substring(0, 31));
+                    });
+                }
+
+                XLSX.writeFile(wb, `logistics_optimization_${Date.now()}.xlsx`, { cellStyles: true });
+                showToast('📊 Excel file exported successfully!', 'success');
+            };
+
+            // Render functions for each tab
+            const renderUploadTab = () => (
+                <div className="card">
+                    <h2 className="card-title">📁 Upload Inventory Excel</h2>
+                    <div 
+                        className="file-upload-zone"
+                        onDrop={handleDrop}
+                        onDragOver={(e) => e.preventDefault()}
+                        onClick={() => fileInputRef.current?.click()}
+                    >
+                        <div className="file-upload-icon">📊</div>
+                        <h3>Drop Excel file here or click to browse</h3>
+                        <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>
+                            Supported: .xlsx, .xls
+                        </p>
+                        {excelFile && <div className="file-name">✓ {excelFile.name}</div>}
+                    </div>
+                    <input 
+                        ref={fileInputRef}
+                        type="file" 
+                        accept=".xlsx,.xls"
+                        onChange={(e) => handleFileUpload(e.target.files[0])}
+                        style={{ display: 'none' }}
+                    />
+                    
+                    {excelData && (
+                        <div style={{ marginTop: '2rem' }}>
+                            <h3 style={{ marginBottom: '1rem' }}>📋 Preview</h3>
+                            <div className="table-container">
+                                <table className="data-table">
+                                    <thead>
+                                        <tr>
+                                            {excelData[0]?.slice(0, 10).map((header, i) => (
+                                                <th key={i}>{header}</th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {excelData.slice(1, 6).map((row, i) => (
+                                            <tr key={i}>
+                                                {row.slice(0, 10).map((cell, j) => (
+                                                    <td key={j}>{cell}</td>
+                                                ))}
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>
+                                Showing first 5 rows of {excelData.length - 1} total rows
+                            </p>
+                        </div>
+                    )}
+                </div>
+            );
+
+            const renderOptimizeTab = () => (
+                <div>
+                    <div className="card">
+                        <h2 className="card-title">⚙️ Configuration</h2>
+                        
+                        {/* Quote Upload Section */}
+                        <div style={{ 
+                            background: 'rgba(183, 28, 28, 0.1)', 
+                            padding: '1rem', 
+                            borderRadius: '8px',
+                            marginBottom: '1.5rem',
+                            border: '1px solid var(--secondary)'
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                                <span style={{ fontWeight: 600 }}>📋 Quick Setup:</span>
+                                <button 
+                                    className="btn btn-secondary"
+                                    onClick={() => quoteForOptimizerRef.current?.click()}
+                                    disabled={!excelData}
+                                    style={{ padding: '0.75rem 1.5rem' }}
+                                >
+                                    Load Quote (Auto-fill Equipment)
+                                </button>
+                                {Object.keys(equipmentFromQuote).length > 0 && (
+                                    <span style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                        ✓ {Object.keys(equipmentFromQuote).length} items loaded from quote
+                                    </span>
+                                )}
+                            </div>
+                            <input 
+                                ref={quoteForOptimizerRef}
+                                type="file" 
+                                accept=".xlsx,.xls"
+                                onChange={(e) => {
+                                    const file = e.target.files[0];
+                                    if (file) loadQuoteForOptimizer(file);
+                                }}
+                                style={{ display: 'none' }}
+                            />
+                            {!excelData && (
+                                <p style={{ 
+                                    color: 'var(--text-secondary)', 
+                                    fontSize: '0.9rem', 
+                                    marginTop: '0.5rem',
+                                    marginBottom: 0
+                                }}>
+                                    ⚠️ Load inventory file first before loading quote
+                                </p>
+                            )}
+                        </div>
+                        
+                        <div className="form-group">
+                            <label className="form-label">Destination Warehouse</label>
+                            <select 
+                                className="form-select"
+                                value={destination}
+                                onChange={(e) => setDestination(e.target.value)}
+                            >
+                                <option value="">Select destination...</option>
+                                {Object.keys(WAREHOUSE_COORDS).map(wh => (
+                                    <option key={wh} value={wh}>{wh}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Equipment Name</label>
+                            <input 
+                                type="text"
+                                className="form-input"
+                                placeholder="Enter equipment name or select from quote..."
+                                value={equipment}
+                                onChange={(e) => setEquipment(e.target.value)}
+                                list="equipment-suggestions"
+                            />
+                            {Object.keys(equipmentFromQuote).length > 0 && (
+                                <datalist id="equipment-suggestions">
+                                    {Object.keys(equipmentFromQuote).map(eq => (
+                                        <option key={eq} value={eq} />
+                                    ))}
+                                </datalist>
+                            )}
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Quantity Needed</label>
+                            <input 
+                                type="number"
+                                className="form-input"
+                                placeholder="Enter quantity..."
+                                value={quantity}
+                                onChange={(e) => setQuantity(e.target.value)}
+                                min="1"
+                            />
+                            {equipment && equipmentFromQuote[equipment] && (
+                                <p style={{ 
+                                    color: 'var(--secondary)', 
+                                    fontSize: '0.9rem', 
+                                    marginTop: '0.5rem',
+                                    fontFamily: "'JetBrains Mono', monospace"
+                                }}>
+                                    💡 Quote specifies {equipmentFromQuote[equipment]} units
+                                    <button
+                                        className="btn btn-secondary"
+                                        onClick={() => setQuantity(equipmentFromQuote[equipment])}
+                                        style={{ 
+                                            marginLeft: '1rem', 
+                                            padding: '0.25rem 0.75rem',
+                                            fontSize: '0.85rem'
+                                        }}
+                                    >
+                                        Use Quote Qty
+                                    </button>
+                                </p>
+                            )}
+                        </div>
+
+                        {Object.keys(equipmentFromQuote).length > 0 && (
+                            <div style={{ 
+                                background: 'rgba(0, 0, 0, 0.2)', 
+                                padding: '1rem', 
+                                borderRadius: '8px',
+                                marginTop: '1rem'
+                            }}>
+                                <h4 style={{ 
+                                    color: 'var(--secondary)', 
+                                    marginBottom: '1rem',
+                                    fontSize: '1rem'
+                                }}>
+                                    📋 Equipment Loaded from Quote ({Object.keys(equipmentFromQuote).length} items):
+                                </h4>
+                                <div style={{ 
+                                    display: 'grid',
+                                    gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+                                    gap: '0.5rem',
+                                    maxHeight: '300px',
+                                    overflowY: 'auto'
+                                }}>
+                                    {Object.entries(equipmentFromQuote).map(([eq, qty]) => (
+                                        <div 
+                                            key={eq}
+                                            style={{ 
+                                                background: 'rgba(183, 28, 28, 0.1)',
+                                                padding: '0.75rem',
+                                                borderRadius: '6px',
+                                                fontSize: '0.85rem',
+                                                fontFamily: "'JetBrains Mono', monospace",
+                                                border: '1px solid rgba(183, 28, 28, 0.3)'
+                                            }}
+                                        >
+                                            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>{eq}</div>
+                                            <div style={{ color: 'var(--text-secondary)' }}>
+                                                Qty: {qty} units
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <p style={{ 
+                                    color: 'var(--success)', 
+                                    fontSize: '0.9rem',
+                                    marginTop: '1rem',
+                                    marginBottom: 0,
+                                    fontWeight: 600
+                                }}>
+                                    ✓ Ready for bulk optimization! Select destination and scenarios, then click "Bulk Optimize All"
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="form-group">
+                            <label className="form-label">Destination Warehouse</label>
+                            <select 
+                                className="form-select"
+                                value={destination}
+                                onChange={(e) => setDestination(e.target.value)}
+                            >
+                                <option value="">Select destination...</option>
+                                {Object.keys(WAREHOUSE_COORDS).map(wh => (
+                                    <option key={wh} value={wh}>{wh}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Equipment Name</label>
+                            <input 
+                                type="text"
+                                className="form-input"
+                                placeholder="Enter equipment name..."
+                                value={equipment}
+                                onChange={(e) => setEquipment(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Quantity Needed</label>
+                            <input 
+                                type="number"
+                                className="form-input"
+                                placeholder="Enter quantity..."
+                                value={quantity}
+                                onChange={(e) => setQuantity(e.target.value)}
+                                min="1"
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Regional Filter (Optional)</label>
+                            <select 
+                                className="form-select"
+                                value={selectedRegion}
+                                onChange={(e) => setSelectedRegion(e.target.value)}
+                            >
+                                <option value="">All Regions</option>
+                                {Object.entries(REGIONS).map(([name, data]) => (
+                                    <option key={name} value={name}>
+                                        {name} - {data.warehouses.length} warehouses
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {selectedRegion && (
+                            <div style={{ 
+                                background: 'rgba(183, 28, 28, 0.1)', 
+                                padding: '1rem', 
+                                borderRadius: '8px',
+                                marginTop: '1rem'
+                            }}>
+                                <strong>Selected Region:</strong> {selectedRegion}<br/>
+                                <strong>Warehouses:</strong> {REGIONS[selectedRegion].warehouses.join(', ')}
+                            </div>
+                        )}
+
+                        <div className="form-group">
+                            <label className="form-label">Preferred Warehouse (Optional)</label>
+                            <select 
+                                className="form-select"
+                                value={preferredWarehouse}
+                                onChange={(e) => setPreferredWarehouse(e.target.value)}
+                            >
+                                <option value="">None - Use Standard Priority</option>
+                                {Object.keys(WAREHOUSE_COORDS).map(wh => (
+                                    <option key={wh} value={wh}>{wh}</option>
+                                ))}
+                            </select>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                                💡 For "Preferred Source" scenario: Pull from Destination → Preferred → Others
+                            </p>
+                        </div>
+
+                        {preferredWarehouse && (
+                            <div style={{ 
+                                background: 'rgba(255, 193, 7, 0.1)', 
+                                padding: '1rem', 
+                                borderRadius: '8px',
+                                border: '1px solid rgba(255, 193, 7, 0.3)',
+                                marginTop: '0.5rem'
+                            }}>
+                                <strong>⭐ Preferred Warehouse:</strong> {preferredWarehouse}<br/>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                    Will prioritize after destination in "Preferred Source" scenario
+                                </span>
+                            </div>
+                        )}
+
+                        <div className="form-group">
+                            <label className="form-label">Date Range (Optional)</label>
+                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                <input 
+                                    type="date"
+                                    className="form-input"
+                                    value={selectedDates.start}
+                                    onChange={(e) => setSelectedDates({...selectedDates, start: e.target.value})}
+                                    style={{ flex: 1 }}
+                                />
+                                <span style={{ color: 'var(--text-secondary)' }}>to</span>
+                                <input 
+                                    type="date"
+                                    className="form-input"
+                                    value={selectedDates.end}
+                                    onChange={(e) => setSelectedDates({...selectedDates, end: e.target.value})}
+                                    style={{ flex: 1 }}
+                                />
+                            </div>
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                                📅 Filter inventory availability by date range
+                            </p>
+                        </div>
+
+                        {selectedDates.start && selectedDates.end && (
+                            <div style={{ 
+                                background: 'rgba(76, 175, 80, 0.1)', 
+                                padding: '1rem', 
+                                borderRadius: '8px',
+                                border: '1px solid rgba(76, 175, 80, 0.3)',
+                                marginTop: '0.5rem'
+                            }}>
+                                <strong>📅 Date Range Selected:</strong> {selectedDates.start} to {selectedDates.end}<br/>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                    Only inventory available during this period will be used
+                                </span>
+                            </div>
+                        )}
+
+                        {availableDates.length > 0 && (
+                            <div style={{ 
+                                background: 'rgba(139, 28, 28, 0.1)', 
+                                padding: '1rem', 
+                                borderRadius: '8px',
+                                border: '1px solid rgba(139, 28, 28, 0.3)',
+                                marginTop: '0.5rem'
+                            }}>
+                                <strong>📆 Available Dates in Inventory:</strong><br/>
+                                <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontFamily: "'JetBrains Mono', monospace" }}>
+                                    {availableDates[0].dateStr} to {availableDates[availableDates.length - 1].dateStr}
+                                    {' '}({availableDates.length} dates)
+                                </span>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="card">
+                        <h2 className="card-title">🎯 Optimization Scenarios</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                            Select one or more scenarios to compare
+                        </p>
+                        
+                        <div className="scenarios-grid">
+                            {OPTIMIZATION_SCENARIOS.map(scenario => (
+                                <div 
+                                    key={scenario.id}
+                                    className={`scenario-card ${selectedScenarios.includes(scenario.id) ? 'selected' : ''}`}
+                                    onClick={() => {
+                                        setSelectedScenarios(prev => 
+                                            prev.includes(scenario.id) 
+                                                ? prev.filter(id => id !== scenario.id)
+                                                : [...prev, scenario.id]
+                                        );
+                                    }}
+                                >
+                                    <div className="scenario-title">
+                                        {scenario.icon} {scenario.name}
+                                    </div>
+                                    <div className="scenario-description">
+                                        {scenario.description}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div style={{ textAlign: 'center', marginTop: '2rem', display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                        {Object.keys(equipmentFromQuote).length > 0 && (
+                            <button 
+                                className="btn btn-primary"
+                                onClick={bulkOptimizeAllQuoteItems}
+                                disabled={!excelData || !destination || selectedScenarios.length === 0 || isBulkOptimizing}
+                                style={{ fontSize: '1.2rem', padding: '1.5rem 3rem' }}
+                            >
+                                {isBulkOptimizing ? (
+                                    <>
+                                        <span className="loading"></span>
+                                        Optimizing {Object.keys(equipmentFromQuote).length} items...
+                                    </>
+                                ) : (
+                                    <>
+                                        📦 Bulk Optimize All ({Object.keys(equipmentFromQuote).length} items)
+                                    </>
+                                )}
+                            </button>
+                        )}
+                        
+                        <button 
+                            className="btn btn-success"
+                            onClick={optimizeLogistics}
+                            disabled={!excelData || !destination || !equipment || !quantity || selectedScenarios.length === 0 || isProcessing}
+                            style={{ fontSize: '1.2rem', padding: '1.5rem 3rem' }}
+                        >
+                            {isProcessing ? (
+                                <>
+                                    <span className="loading"></span>
+                                    Processing...
+                                </>
+                            ) : (
+                                <>
+                                    🚀 Run Single Optimization
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </div>
+            );
+
+            const renderResultsTab = () => {
+                if (!results) {
+                    return (
+                        <div className="card" style={{ textAlign: 'center', padding: '4rem' }}>
+                            <h3 style={{ color: 'var(--text-secondary)' }}>
+                                No results yet. Run an optimization first.
+                            </h3>
+                        </div>
+                    );
+                }
+
+                // Bulk mode results
+                if (results.bulkMode) {
+                    return (
+                        <div>
+                            <div className="card">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                                    <div>
+                                        <h2 className="card-title">📦 Bulk Optimization Results</h2>
+                                        <p style={{ color: 'var(--text-secondary)' }}>
+                                            {results.itemCount} items optimized • Destination: {results.destination}
+                                        </p>
+                                    </div>
+                                    <button className="btn btn-success" onClick={exportToExcel}>
+                                        📥 Export to Excel
+                                    </button>
+                                </div>
+
+                                <div className="stats-grid">
+                                    <div className="stat-card">
+                                        <div className="stat-label">Total Items</div>
+                                        <div className="stat-value">{results.itemCount}</div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-label">Destination</div>
+                                        <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+                                            {results.destination}
+                                        </div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-label">Distance Method</div>
+                                        <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+                                            {results.distanceType}
+                                        </div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-label">Scenarios Compared</div>
+                                        <div className="stat-value">{selectedScenarios.length}</div>
+                                    </div>
+                                </div>
+
+                                <div style={{ 
+                                    marginTop: '2rem',
+                                    padding: '2rem',
+                                    background: 'rgba(139, 28, 28, 0.1)',
+                                    borderRadius: '12px',
+                                    border: '2px solid var(--secondary)',
+                                    textAlign: 'center'
+                                }}>
+                                    <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>✅</div>
+                                    <h3 style={{ color: 'var(--success)', marginBottom: '1rem' }}>
+                                        Optimization Complete!
+                                    </h3>
+                                    <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', marginBottom: '1.5rem' }}>
+                                        {results.itemCount} equipment items have been optimized across {selectedScenarios.length} scenario{selectedScenarios.length > 1 ? 's' : ''}.
+                                    </p>
+                                    <p style={{ color: 'var(--text-primary)', fontSize: '1rem' }}>
+                                        📊 Click <strong>"Export to Excel"</strong> above to download the complete results with all equipment details, pulls, and shortfalls for each scenario.
+                                    </p>
+                                </div>
+
+                                {/* Show scenarios selected */}
+                                <div style={{ marginTop: '2rem' }}>
+                                    <h4 style={{ color: 'var(--secondary)', marginBottom: '1rem' }}>
+                                        Scenarios Included:
+                                    </h4>
+                                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                        {selectedScenarios.map(scenarioId => {
+                                            const scenario = OPTIMIZATION_SCENARIOS.find(s => s.id === scenarioId);
+                                            return (
+                                                <div key={scenarioId} style={{
+                                                    padding: '0.75rem 1.5rem',
+                                                    background: 'rgba(183, 28, 28, 0.2)',
+                                                    border: '1px solid var(--secondary)',
+                                                    borderRadius: '8px',
+                                                    color: 'var(--secondary)',
+                                                    fontWeight: 600
+                                                }}>
+                                                    {scenario?.icon} {scenario?.name}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                }
+
+                // Single item results
+                return (
+                    <div>
+                        <div className="card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+                                <div>
+                                    <h2 className="card-title">📊 Optimization Results</h2>
+                                    <p style={{ color: 'var(--text-secondary)' }}>
+                                        {results.equipment} • {results.quantity} units • {results.destination}
+                                    </p>
+                                </div>
+                                <button className="btn btn-success" onClick={exportToExcel}>
+                                    📥 Export to Excel
+                                </button>
+                            </div>
+
+                            <div className="stats-grid">
+                                <div className="stat-card">
+                                    <div className="stat-label">Scenarios Analyzed</div>
+                                    <div className="stat-value">{Object.keys(results.scenarios).length}</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-label">Distance Method</div>
+                                    <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+                                        {results.distanceType}
+                                    </div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-label">Regional Filter</div>
+                                    <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+                                        {selectedRegion || 'None'}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {Object.entries(results.scenarios).map(([scenarioId, result]) => {
+                            const scenario = OPTIMIZATION_SCENARIOS.find(s => s.id === scenarioId);
+                            return (
+                                <div key={scenarioId} className="result-card">
+                                    <div className="result-header">
+                                        <div>
+                                            <div className="result-title">
+                                                {scenario?.icon} {scenario?.name}
+                                            </div>
+                                            <p style={{ color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+                                                {scenario?.description}
+                                            </p>
+                                        </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            {result.fulfilled ? (
+                                                <span className="api-status connected">✓ Fulfilled</span>
+                                            ) : (
+                                                <span className="api-status disconnected">
+                                                    ⚠️ Short {result.shortfall}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="stats-grid">
+                                        <div className="stat-card">
+                                            <div className="stat-label">Total Distance</div>
+                                            <div className="stat-value">
+                                                {result.totalDistance.toLocaleString()}
+                                                <span className="stat-unit">mi</span>
+                                            </div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-label">Avg Distance</div>
+                                            <div className="stat-value">
+                                                {result.avgDistance.toLocaleString()}
+                                                <span className="stat-unit">mi</span>
+                                            </div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-label">Total Weight</div>
+                                            <div className="stat-value">
+                                                {result.totalWeight.toLocaleString()}
+                                                <span className="stat-unit">lbs</span>
+                                            </div>
+                                        </div>
+                                        <div className="stat-card">
+                                            <div className="stat-label">Trips Required</div>
+                                            <div className="stat-value">{result.totalTrips}</div>
+                                        </div>
+                                    </div>
+
+                                    <h3 style={{ marginTop: '2rem', marginBottom: '1rem', color: 'var(--secondary)' }}>
+                                        Warehouse Allocation:
+                                    </h3>
+                                    <div className="warehouse-list">
+                                        {result.pulls.map((pull, idx) => (
+                                            <div key={idx} className="warehouse-item">
+                                                <div className="warehouse-name">{pull.warehouse}</div>
+                                                <div>
+                                                    <span className={`region-tag ${pull.region.includes('1') ? 'region-1' : 'region-2'}`}>
+                                                        {pull.region}
+                                                    </span>
+                                                </div>
+                                                <div className="warehouse-qty">
+                                                    <strong>{pull.quantity}</strong> / {pull.available} units
+                                                </div>
+                                                <div className="warehouse-distance">
+                                                    {pull.distance} mi
+                                                </div>
+                                                <div className="warehouse-weight">
+                                                    {pull.weight.toLocaleString()} lbs
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                );
+            };
+
+            const renderQuoteConverterTab = () => {
+                const convertQuote = async () => {
+                    if (!quoteFile) {
+                        showToast('⚠️ Please select a quote file to convert', 'warning');
+                        return;
+                    }
+
+                    setIsConvertingQuote(true);
+                    setQuoteConversionLog([]);
+                    const log = [];
+
+                    const addLog = (msg) => {
+                        log.push(msg);
+                        setQuoteConversionLog([...log]);
+                    };
+
+                    try {
+                        addLog('📖 Reading input Excel file...');
+                        const data = await quoteFile.arrayBuffer();
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const rawData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+                        
+                        addLog(`✓ File contains ${rawData.length} rows and ${rawData[0]?.length || 0} columns`);
+
+                        // Find header row
+                        let headerRowIdx = 0;
+                        for (let i = 0; i < Math.min(5, rawData.length); i++) {
+                            const row = rawData[i].map(cell => String(cell).toLowerCase());
+                            if (row.some(c => c.includes('main')) && 
+                                row.some(c => c.includes('equipment')) && 
+                                row.some(c => c.includes('description'))) {
+                                headerRowIdx = i;
+                                addLog(`✓ Found header row at index ${i}`);
+                                break;
+                            }
+                        }
+
+                        if (headerRowIdx === 0 && rawData.length > 0) {
+                            addLog('⚠️ Header row not auto-detected, using first row');
+                        }
+
+                        const headers = rawData[headerRowIdx];
+                        addLog(`📋 Headers: ${headers.slice(0, 10).join(', ')}...`);
+
+                        // Find required columns
+                        const requiredColumns = ['Main', 'Equipment', 'Description', 'Ordered'];
+                        const optionalColumns = ['Qty Available', 'Min Avail Qty'];
+                        const columnMapping = {};
+                        const missingColumns = [];
+
+                        requiredColumns.forEach(reqCol => {
+                            const found = headers.findIndex(h => 
+                                String(h).trim().toLowerCase() === reqCol.toLowerCase()
+                            );
+                            if (found >= 0) {
+                                columnMapping[reqCol] = found;
+                            } else {
+                                missingColumns.push(reqCol);
+                            }
+                        });
+
+                        optionalColumns.forEach(optCol => {
+                            const found = headers.findIndex(h => 
+                                String(h).trim().toLowerCase().replace(/\s+/g, '') === 
+                                optCol.toLowerCase().replace(/\s+/g, '')
+                            );
+                            if (found >= 0) {
+                                columnMapping[optCol] = found;
+                                addLog(`✓ Found optional column: ${optCol}`);
+                            }
+                        });
+
+                        if (missingColumns.length > 0) {
+                            addLog(`❌ Missing required columns: ${missingColumns.join(', ')}`);
+                            addLog('Available columns:');
+                            headers.forEach((h, i) => addLog(`  ${i}: "${h}"`));
+                            showToast(`❌ Missing columns: ${missingColumns.join(', ')}`, 'error');
+                            setIsConvertingQuote(false);
+                            return;
+                        }
+
+                        addLog('✓ All required columns found');
+
+                        // Extract and convert data
+                        const convertedData = [];
+                        const outputHeaders = [...requiredColumns];
+                        
+                        // Add optional columns to output if they exist
+                        optionalColumns.forEach(col => {
+                            if (columnMapping[col] !== undefined) {
+                                outputHeaders.push(col);
+                            }
+                        });
+
+                        convertedData.push(outputHeaders);
+
+                        for (let i = headerRowIdx + 1; i < rawData.length; i++) {
+                            const row = rawData[i];
+                            // Skip empty rows
+                            if (!row || row.every(cell => !cell || String(cell).trim() === '')) {
+                                continue;
+                            }
+
+                            const convertedRow = outputHeaders.map(colName => {
+                                const colIdx = columnMapping[colName];
+                                return colIdx !== undefined ? (row[colIdx] || '') : '';
+                            });
+
+                            // Skip rows where all required fields are empty
+                            const hasData = requiredColumns.some(colName => {
+                                const colIdx = columnMapping[colName];
+                                const value = row[colIdx];
+                                return value && String(value).trim() !== '';
+                            });
+
+                            if (hasData) {
+                                convertedData.push(convertedRow);
+                            }
+                        }
+
+                        const dataRowCount = convertedData.length - 1; // Exclude header
+                        addLog(`✓ Extracted ${dataRowCount} data rows`);
+                        addLog(`📊 Output columns: ${outputHeaders.join(', ')}`);
+
+                        // Create new workbook
+                        const newWb = XLSX.utils.book_new();
+                        const newWs = XLSX.utils.aoa_to_sheet(convertedData);
+                        
+                        // Auto-size columns
+                        const colWidths = outputHeaders.map((header, i) => {
+                            let maxWidth = header.length;
+                            for (let row of convertedData.slice(1)) {
+                                const cellLength = String(row[i] || '').length;
+                                maxWidth = Math.max(maxWidth, cellLength);
+                            }
+                            return { wch: Math.min(maxWidth + 2, 50) };
+                        });
+                        newWs['!cols'] = colWidths;
+
+                        XLSX.utils.book_append_sheet(newWb, newWs, 'Rental Items');
+
+                        // Generate and download file
+                        const outputFileName = quoteFile.name.replace(/\.[^/.]+$/, '') + '_converted.xlsx';
+                        XLSX.writeFile(newWb, outputFileName);
+
+                        addLog('═══════════════════════════════════');
+                        addLog('✅ CONVERSION COMPLETED SUCCESSFULLY!');
+                        addLog('═══════════════════════════════════');
+                        addLog(`Original columns: ${headers.length}`);
+                        addLog(`Converted columns: ${outputHeaders.length}`);
+                        addLog(`Rows processed: ${dataRowCount}`);
+                        addLog(`Output file: ${outputFileName}`);
+                        addLog('');
+                        addLog('Sample of converted data:');
+                        addLog('─────────────────────────────────');
+                        
+                        convertedData.slice(1, 6).forEach((row, i) => {
+                            addLog(`Row ${i + 1}: ${row.slice(0, 4).join(' | ')}`);
+                        });
+
+                        showToast('✅ Quote converted and downloaded!', 'success');
+
+                    } catch (error) {
+                        addLog(`❌ ERROR: ${error.message}`);
+                        showToast(`❌ Conversion failed: ${error.message}`, 'error');
+                    }
+
+                    setIsConvertingQuote(false);
+                };
+
+                return (
+                    <div>
+                        <div className="card">
+                            <h2 className="card-title">📄 Rental Quote Format Converter</h2>
+                            <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem', lineHeight: '1.6' }}>
+                                This tool converts detailed rental quotes (47+ columns) to simplified format (4 columns).<br/>
+                                <strong>Output format:</strong> Main | Equipment | Description | Ordered<br/>
+                                <strong>Optional columns</strong> (if present): Qty Available | Min Avail Qty
+                            </p>
+
+                            <div 
+                                className="file-upload-zone"
+                                onClick={() => quoteInputRef.current?.click()}
+                                style={{ padding: '3rem 2rem' }}
+                            >
+                                <div className="file-upload-icon">📋</div>
+                                <h3>Drop quote Excel file here or click to browse</h3>
+                                <p style={{ color: 'var(--text-secondary)', marginTop: '1rem' }}>
+                                    Complex format (47+ columns) → Simple format (4-6 columns)
+                                </p>
+                                {quoteFile && <div className="file-name">✓ {quoteFile.name}</div>}
+                            </div>
+                            <input 
+                                ref={quoteInputRef}
+                                type="file" 
+                                accept=".xlsx,.xls"
+                                onChange={(e) => {
+                                    const file = e.target.files[0];
+                                    if (file) {
+                                        setQuoteFile(file);
+                                        setQuoteConversionLog([]);
+                                    }
+                                }}
+                                style={{ display: 'none' }}
+                            />
+
+                            <div style={{ textAlign: 'center', marginTop: '2rem' }}>
+                                <button 
+                                    className="btn btn-success"
+                                    onClick={convertQuote}
+                                    disabled={!quoteFile || isConvertingQuote}
+                                    style={{ fontSize: '1.2rem', padding: '1.5rem 3rem' }}
+                                >
+                                    {isConvertingQuote ? (
+                                        <>
+                                            <span className="loading"></span>
+                                            Converting...
+                                        </>
+                                    ) : (
+                                        <>
+                                            🔄 Convert Quote Format
+                                        </>
+                                    )}
+                                </button>
+                            </div>
+                        </div>
+
+                        {quoteConversionLog.length > 0 && (
+                            <div className="card">
+                                <h2 className="card-title">📋 Conversion Log</h2>
+                                <div style={{
+                                    background: 'rgba(0, 0, 0, 0.3)',
+                                    padding: '1.5rem',
+                                    borderRadius: '12px',
+                                    fontFamily: "'JetBrains Mono', monospace",
+                                    fontSize: '0.9rem',
+                                    maxHeight: '500px',
+                                    overflowY: 'auto',
+                                    lineHeight: '1.8'
+                                }}>
+                                    {quoteConversionLog.map((log, i) => (
+                                        <div key={i} style={{ 
+                                            marginBottom: '0.5rem',
+                                            color: log.includes('ERROR') || log.includes('❌') ? 'var(--error)' :
+                                                   log.includes('SUCCESS') || log.includes('✅') ? 'var(--success)' :
+                                                   log.includes('⚠️') ? 'var(--warning)' :
+                                                   'var(--text-primary)'
+                                        }}>
+                                            {log}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const renderSettingsTab = () => (
+                <div>
+                    <div className="card">
+                        <h2 className="card-title">🔧 API Configuration</h2>
+                        
+                        <div className="form-group">
+                            <label className="form-label">OpenRouteService API Key</label>
+                            <input 
+                                type="text"
+                                className="form-input"
+                                placeholder="Get free key at openrouteservice.org"
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                            />
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.5rem' }}>
+                                Free tier: 2,000 requests/day • Required for road-based distances
+                            </p>
+                        </div>
+
+                        <div className="checkbox-wrapper">
+                            <input 
+                                type="checkbox"
+                                checked={useRoadDistances}
+                                onChange={(e) => setUseRoadDistances(e.target.checked)}
+                                id="road-distances"
+                            />
+                            <label htmlFor="road-distances">
+                                Use road-based distances (requires API key)
+                            </label>
+                        </div>
+
+                        <div style={{ marginTop: '1rem' }}>
+                            <span className={`api-status ${apiKey ? 'connected' : 'disconnected'}`}>
+                                <span className={`status-dot ${apiKey ? 'active' : 'inactive'}`}></span>
+                                {apiKey ? 'API Key Configured' : 'No API Key'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="card">
+                        <h2 className="card-title">⚖️ Equipment Weights</h2>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                            Set default weights for equipment (lbs per unit)
+                        </p>
+
+                        <div className="form-group">
+                            <label className="form-label">Equipment Name</label>
+                            <input 
+                                type="text"
+                                className="form-input"
+                                placeholder="Enter equipment name..."
+                                id="weight-equipment"
+                            />
+                        </div>
+
+                        <div className="form-group">
+                            <label className="form-label">Weight (lbs)</label>
+                            <input 
+                                type="number"
+                                className="form-input"
+                                placeholder="Enter weight..."
+                                id="weight-value"
+                                min="0"
+                                step="0.1"
+                            />
+                        </div>
+
+                        <button 
+                            className="btn btn-secondary"
+                            onClick={() => {
+                                const name = document.getElementById('weight-equipment').value;
+                                const weight = parseFloat(document.getElementById('weight-value').value);
+                                if (name && weight > 0) {
+                                    const newWeights = { ...equipmentWeights, [name]: weight };
+                                    setEquipmentWeights(newWeights);
+                                    localStorage.setItem('equipment_weights', JSON.stringify(newWeights));
+                                    showToast(`✅ Weight saved for ${name}`, 'success');
+                                    document.getElementById('weight-equipment').value = '';
+                                    document.getElementById('weight-value').value = '';
+                                }
+                            }}
+                        >
+                            💾 Save Weight
+                        </button>
+
+                        {Object.keys(equipmentWeights).length > 0 && (
+                            <div style={{ marginTop: '2rem' }}>
+                                <h3 style={{ marginBottom: '1rem' }}>Saved Weights:</h3>
+                                <div className="table-container">
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Equipment</th>
+                                                <th>Weight (lbs)</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {Object.entries(equipmentWeights).map(([name, weight]) => (
+                                                <tr key={name}>
+                                                    <td>{name}</td>
+                                                    <td>{weight}</td>
+                                                    <td>
+                                                        <button 
+                                                            className="btn btn-warning"
+                                                            style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+                                                            onClick={() => {
+                                                                const newWeights = { ...equipmentWeights };
+                                                                delete newWeights[name];
+                                                                setEquipmentWeights(newWeights);
+                                                                localStorage.setItem('equipment_weights', JSON.stringify(newWeights));
+                                                                showToast(`🗑️ Weight removed for ${name}`, 'success');
+                                                            }}
+                                                        >
+                                                            🗑️ Remove
+                                                        </button>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="card">
+                        <h2 className="card-title">🌍 Regional Configuration</h2>
+                        {Object.entries(REGIONS).map(([regionName, regionData]) => (
+                            <div key={regionName} style={{ marginBottom: '1.5rem' }}>
+                                <h3 style={{ 
+                                    color: 'var(--secondary)', 
+                                    marginBottom: '0.5rem',
+                                    fontSize: '1.1rem'
+                                }}>
+                                    {regionName}
+                                </h3>
+                                <p style={{ color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                                    {regionData.description}
+                                </p>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                    {regionData.warehouses.map(wh => (
+                                        <span key={wh} className={`badge ${regionName.includes('1') ? 'region-1' : 'region-2'}`}>
+                                            {wh}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            return (
+                <div className="app-container">
+                    <header className="header">
+                        <div className="header-content">
+                            <h1>🚛 LOGISTICS OPTIMIZER</h1>
+                            <p className="header-subtitle">
+                                Regional Equipment Management & Multi-Warehouse Optimization
+                            </p>
+                            <div className="header-badges">
+                                <span className="badge">📄 Quote Converter</span>
+                                <span className="badge">📏 Distance Optimization</span>
+                                <span className="badge">🌍 Regional Analysis</span>
+                                <span className="badge">⚖️ Weight Calculations</span>
+                                <span className="badge">📊 Excel Integration</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div className="tabs">
+                        <div 
+                            className={`tab ${activeTab === 'upload' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('upload')}
+                        >
+                            📁 Upload Data
+                        </div>
+                        <div 
+                            className={`tab ${activeTab === 'quote' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('quote')}
+                        >
+                            📄 Quote Converter
+                        </div>
+                        <div 
+                            className={`tab ${activeTab === 'optimize' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('optimize')}
+                        >
+                            ⚙️ Configure & Optimize
+                        </div>
+                        <div 
+                            className={`tab ${activeTab === 'results' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('results')}
+                        >
+                            📊 Results
+                        </div>
+                        <div 
+                            className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('settings')}
+                        >
+                            🔧 Settings
+                        </div>
+                    </div>
+
+                    {activeTab === 'upload' && renderUploadTab()}
+                    {activeTab === 'quote' && renderQuoteConverterTab()}
+                    {activeTab === 'optimize' && renderOptimizeTab()}
+                    {activeTab === 'results' && renderResultsTab()}
+                    {activeTab === 'settings' && renderSettingsTab()}
+
+                    {toast && (
+                        <div className={`toast ${toast.type}`}>
+                            {toast.message}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<LogisticsOptimizer />, document.getElementById('root'));
+    </script>
+</body>
+</html>
