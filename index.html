@@ -1136,7 +1136,6 @@
             const [equipmentFromQuote, setEquipmentFromQuote] = useState({});
             const [equipmentDescriptions, setEquipmentDescriptions] = useState({});
             const [selectedEquipmentItems, setSelectedEquipmentItems] = useState({});
-            const [batchOptimizationMode, setBatchOptimizationMode] = useState(false);
             const [isBulkOptimizing, setIsBulkOptimizing] = useState(false);
             const [bulkResults, setBulkResults] = useState(null);
             const [preferredWarehouse, setPreferredWarehouse] = useState('');
@@ -1574,10 +1573,10 @@
                     
                     // Find column indices
                     const equipmentColIdx = headers.findIndex(h => 
-                        h && String(h).toLowerCase().trim() === 'equipment'
+                        h && String(h).toLowerCase().includes('equipment')
                     );
                     const locationColIdx = headers.findIndex(h => 
-                        h && String(h).toLowerCase().trim() === 'location'
+                        h && String(h).toLowerCase().includes('location')
                     );
                     
                     // Find "Qty" columns with their corresponding dates
@@ -2211,7 +2210,7 @@
                     .map(([wh, qty]) => ({
                         warehouse: wh,
                         available: qty,
-                        distance: distances[wh] || 0,
+                        distance: distances[wh] !== undefined ? distances[wh] : 999999,
                         region: getWarehouseRegion(wh)
                     }));
 
