@@ -694,24 +694,33 @@
         const { useState, useEffect, useRef, useCallback } = React;
 
         // ============================================
-        // SHAREPOINT CONFIGURATION
+        // SHAREPOINT CONFIGURATION (User-editable)
         // ============================================
-        const SHAREPOINT_CONFIG = {
-            // Microsoft Entra ID (Azure AD) settings
-            clientId: '5764301a-9d69-4b4e-8bb6-83dbd4215e24',
-            tenantId: 'b958ba39-da13-4553-a009-35b1649f44eb',
-            authority: 'https://login.microsoftonline.com/b958ba39-da13-4553-a009-35b1649f44eb',
+        // Load saved settings from localStorage or use defaults
+        const getSharePointConfig = () => {
+            const saved = localStorage.getItem('sharepoint_config');
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch (e) {
+                    console.error('Error loading SharePoint config:', e);
+                }
+            }
+            // Default configuration - user should update these values
+            return {
+                clientId: '',  // User must provide their Azure AD App Client ID
+                tenantId: '',  // User must provide their Azure AD Tenant ID
+                hostname: 'rentexinc.sharepoint.com',
+                sitePath: '/sites/ProductManagers',
+                baseFolder: 'General/Inventory',
+                inventoryFile: 'inventory.xlsx'
+            };
+        };
+
+        // Reactive config that can be updated
+        let SHAREPOINT_CONFIG = {
+            ...getSharePointConfig(),
             redirectUri: window.location.origin + window.location.pathname,
-
-            // SharePoint site settings (can be overridden via environment)
-            hostname: 'rentexinc.sharepoint.com',
-            sitePath: '/sites/ProductManagers',
-            baseFolder: 'General/Inventory',
-
-            // Inventory file name
-            inventoryFile: 'inventory.xlsx',
-
-            // API scopes
             scopes: [
                 'openid',
                 'profile',
@@ -721,33 +730,45 @@
                 'Files.ReadWrite.All',
                 'Sites.ReadWrite.All'
             ],
-
-            // Sync intervals (in milliseconds)
             syncIntervals: {
                 inventory: 300000  // 5 minutes
             }
         };
 
-        // MSAL Configuration
-        const msalConfig = {
-            auth: {
-                clientId: SHAREPOINT_CONFIG.clientId,
-                authority: SHAREPOINT_CONFIG.authority,
-                redirectUri: SHAREPOINT_CONFIG.redirectUri,
-                postLogoutRedirectUri: SHAREPOINT_CONFIG.redirectUri
-            },
-            cache: {
-                cacheLocation: 'localStorage',
-                storeAuthStateInCookie: false
+        // Dynamic MSAL initialization
+        let msalInstance = null;
+
+        const initializeMsal = (clientId, tenantId) => {
+            if (!clientId || !tenantId) {
+                console.log('MSAL not initialized: missing clientId or tenantId');
+                return null;
+            }
+
+            const authority = `https://login.microsoftonline.com/${tenantId}`;
+            const msalConfig = {
+                auth: {
+                    clientId: clientId,
+                    authority: authority,
+                    redirectUri: SHAREPOINT_CONFIG.redirectUri,
+                    postLogoutRedirectUri: SHAREPOINT_CONFIG.redirectUri
+                },
+                cache: {
+                    cacheLocation: 'localStorage',
+                    storeAuthStateInCookie: false
+                }
+            };
+
+            try {
+                return new msal.PublicClientApplication(msalConfig);
+            } catch (error) {
+                console.error('MSAL initialization error:', error);
+                return null;
             }
         };
 
-        // Initialize MSAL instance
-        let msalInstance = null;
-        try {
-            msalInstance = new msal.PublicClientApplication(msalConfig);
-        } catch (error) {
-            console.error('MSAL initialization error:', error);
+        // Initialize MSAL if config exists
+        if (SHAREPOINT_CONFIG.clientId && SHAREPOINT_CONFIG.tenantId) {
+            msalInstance = initializeMsal(SHAREPOINT_CONFIG.clientId, SHAREPOINT_CONFIG.tenantId);
         }
 
         // ============================================
@@ -1039,6 +1060,43 @@
             const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
             const syncIntervalRef = useRef(null);
 
+            // SharePoint configuration form state
+            const [spConfigForm, setSpConfigForm] = useState({
+                clientId: SHAREPOINT_CONFIG.clientId || '',
+                tenantId: SHAREPOINT_CONFIG.tenantId || '',
+                hostname: SHAREPOINT_CONFIG.hostname || '',
+                sitePath: SHAREPOINT_CONFIG.sitePath || '',
+                baseFolder: SHAREPOINT_CONFIG.baseFolder || ''
+            });
+            const [configSaved, setConfigSaved] = useState(!!SHAREPOINT_CONFIG.clientId);
+
+            // Save SharePoint configuration
+            const saveSpConfig = () => {
+                const config = {
+                    clientId: spConfigForm.clientId.trim(),
+                    tenantId: spConfigForm.tenantId.trim(),
+                    hostname: spConfigForm.hostname.trim(),
+                    sitePath: spConfigForm.sitePath.trim(),
+                    baseFolder: spConfigForm.baseFolder.trim(),
+                    inventoryFile: SHAREPOINT_CONFIG.inventoryFile
+                };
+
+                // Save to localStorage
+                localStorage.setItem('sharepoint_config', JSON.stringify(config));
+
+                // Update runtime config
+                SHAREPOINT_CONFIG = {
+                    ...SHAREPOINT_CONFIG,
+                    ...config
+                };
+
+                // Reinitialize MSAL with new credentials
+                msalInstance = initializeMsal(config.clientId, config.tenantId);
+
+                setConfigSaved(true);
+                showToast('SharePoint configuration saved! You can now sign in.', 'success');
+            };
+
             useEffect(() => {
                 // Load equipment weights from localStorage
                 const savedWeights = localStorage.getItem('equipment_weights');
@@ -1099,9 +1157,19 @@
 
             // SharePoint Authentication Functions
             const handleLogin = async () => {
-                if (!msalInstance) {
-                    showToast('Microsoft authentication not available', 'error');
+                if (!spConfigForm.clientId || !spConfigForm.tenantId) {
+                    showToast('Please configure Client ID and Tenant ID first in the SharePoint tab', 'error');
+                    setActiveTab('sharepoint');
                     return;
+                }
+
+                if (!msalInstance) {
+                    // Try to initialize MSAL with current config
+                    msalInstance = initializeMsal(spConfigForm.clientId, spConfigForm.tenantId);
+                    if (!msalInstance) {
+                        showToast('Failed to initialize authentication. Please check your configuration.', 'error');
+                        return;
+                    }
                 }
 
                 try {
@@ -1114,7 +1182,13 @@
                     showToast(`Welcome, ${response.account.name}!`, 'success');
                 } catch (error) {
                     console.error('Login error:', error);
-                    showToast(`Login failed: ${error.message}`, 'error');
+                    if (error.errorCode === 'user_cancelled') {
+                        showToast('Sign-in was cancelled', 'warning');
+                    } else if (error.message?.includes('AADSTS')) {
+                        showToast('Authentication error. Please verify your Client ID and Tenant ID are correct.', 'error');
+                    } else {
+                        showToast(`Login failed: ${error.message}`, 'error');
+                    }
                 }
             };
 
@@ -2305,11 +2379,21 @@
                         </div>
                         <h3 style={{ marginBottom: '0.5rem' }}>Or load from SharePoint</h3>
                         <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
-                            {isAuthenticated
-                                ? 'Load inventory directly from your SharePoint site'
-                                : 'Sign in with Microsoft to access SharePoint files'}
+                            {!spConfigForm.clientId || !spConfigForm.tenantId
+                                ? 'Configure SharePoint settings first to enable cloud access'
+                                : isAuthenticated
+                                    ? 'Load inventory directly from your SharePoint site'
+                                    : 'Sign in with Microsoft to access SharePoint files'}
                         </p>
-                        {isAuthenticated ? (
+                        {!spConfigForm.clientId || !spConfigForm.tenantId ? (
+                            <button
+                                className="btn"
+                                onClick={() => setActiveTab('sharepoint')}
+                                style={{ background: '#0078d4' }}
+                            >
+                                ⚙️ Configure SharePoint
+                            </button>
+                        ) : isAuthenticated ? (
                             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <select
                                     className="form-select"
@@ -3413,44 +3497,137 @@
                     return date.toLocaleString();
                 };
 
+                const isConfigured = spConfigForm.clientId && spConfigForm.tenantId;
+
                 return (
                     <div>
-                        {/* Authentication Card */}
+                        {/* Configuration Card - Always show first */}
                         <div className="card">
-                            <h2 className="card-title">🔐 Microsoft Authentication</h2>
+                            <h2 className="card-title">⚙️ SharePoint Configuration</h2>
+                            <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                                Enter your Azure AD app registration details to connect to SharePoint.
+                                {' '}<a href="https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" style={{ color: 'var(--secondary)' }}>
+                                    Register an app in Azure Portal
+                                </a>
+                            </p>
 
-                            {!isAuthenticated ? (
-                                <div style={{ textAlign: 'center', padding: '2rem' }}>
-                                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-                                        Connect to SharePoint to load inventory data directly from the cloud
-                                    </p>
-                                    <button className="btn btn-success" onClick={handleLogin} style={{ fontSize: '1.1rem', padding: '1rem 2rem' }}>
-                                        🔑 Sign in with Microsoft
-                                    </button>
-                                    <div style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                        <p>Site: {SHAREPOINT_CONFIG.hostname}{SHAREPOINT_CONFIG.sitePath}</p>
-                                        <p>Folder: {SHAREPOINT_CONFIG.baseFolder}</p>
-                                    </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+                                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                                    <label className="form-label">Client ID (Application ID) *</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g., 12345678-1234-1234-1234-123456789abc"
+                                        value={spConfigForm.clientId}
+                                        onChange={(e) => setSpConfigForm(prev => ({ ...prev, clientId: e.target.value }))}
+                                    />
                                 </div>
-                            ) : (
-                                <div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                                        <div>
-                                            <span className="api-status connected">
-                                                <span className="status-dot active"></span>
-                                                Connected
-                                            </span>
-                                            <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
-                                                {userAccount?.name} ({userAccount?.username})
-                                            </p>
-                                        </div>
-                                        <button className="btn btn-secondary" onClick={handleLogout}>
-                                            Sign Out
-                                        </button>
-                                    </div>
+                                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                                    <label className="form-label">Tenant ID (Directory ID) *</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g., 12345678-1234-1234-1234-123456789abc"
+                                        value={spConfigForm.tenantId}
+                                        onChange={(e) => setSpConfigForm(prev => ({ ...prev, tenantId: e.target.value }))}
+                                    />
                                 </div>
-                            )}
+                                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                                    <label className="form-label">SharePoint Hostname</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g., yourcompany.sharepoint.com"
+                                        value={spConfigForm.hostname}
+                                        onChange={(e) => setSpConfigForm(prev => ({ ...prev, hostname: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                                    <label className="form-label">Site Path</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g., /sites/YourSite"
+                                        value={spConfigForm.sitePath}
+                                        onChange={(e) => setSpConfigForm(prev => ({ ...prev, sitePath: e.target.value }))}
+                                    />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: '0.5rem' }}>
+                                    <label className="form-label">Folder Path</label>
+                                    <input
+                                        type="text"
+                                        className="form-input"
+                                        placeholder="e.g., General/Inventory"
+                                        value={spConfigForm.baseFolder}
+                                        onChange={(e) => setSpConfigForm(prev => ({ ...prev, baseFolder: e.target.value }))}
+                                    />
+                                </div>
+                            </div>
+
+                            <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                                <button
+                                    className="btn btn-success"
+                                    onClick={saveSpConfig}
+                                    disabled={!spConfigForm.clientId || !spConfigForm.tenantId}
+                                >
+                                    💾 Save Configuration
+                                </button>
+                                {configSaved && (
+                                    <span style={{ color: 'var(--success)' }}>✓ Configuration saved</span>
+                                )}
+                            </div>
+
+                            <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', fontSize: '0.85rem' }}>
+                                <strong style={{ color: 'var(--warning)' }}>Required Azure AD App Permissions:</strong>
+                                <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem', color: 'var(--text-secondary)' }}>
+                                    <li>User.Read</li>
+                                    <li>Files.ReadWrite.All</li>
+                                    <li>Sites.ReadWrite.All</li>
+                                </ul>
+                                <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                                    Set Redirect URI to: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '0.2rem 0.4rem', borderRadius: '4px' }}>{window.location.origin + window.location.pathname}</code>
+                                </p>
+                            </div>
                         </div>
+
+                        {/* Authentication Card - Only show if configured */}
+                        {isConfigured && (
+                            <div className="card">
+                                <h2 className="card-title">🔐 Microsoft Authentication</h2>
+
+                                {!isAuthenticated ? (
+                                    <div style={{ textAlign: 'center', padding: '2rem' }}>
+                                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                                            Connect to SharePoint to load inventory data directly from the cloud
+                                        </p>
+                                        <button className="btn btn-success" onClick={handleLogin} style={{ fontSize: '1.1rem', padding: '1rem 2rem' }}>
+                                            🔑 Sign in with Microsoft
+                                        </button>
+                                        <div style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                            <p>Site: {spConfigForm.hostname}{spConfigForm.sitePath}</p>
+                                            <p>Folder: {spConfigForm.baseFolder}</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                            <div>
+                                                <span className="api-status connected">
+                                                    <span className="status-dot active"></span>
+                                                    Connected
+                                                </span>
+                                                <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                                                    {userAccount?.name} ({userAccount?.username})
+                                                </p>
+                                            </div>
+                                            <button className="btn btn-secondary" onClick={handleLogout}>
+                                                Sign Out
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {/* Inventory Sync Card */}
                         {isAuthenticated && (
