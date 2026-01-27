@@ -706,15 +706,10 @@
             // SharePoint site settings (can be overridden via environment)
             hostname: 'rentexinc.sharepoint.com',
             sitePath: '/sites/ProductManagers',
-            baseFolder: 'General/Repairs/RepairTracker',
+            baseFolder: 'General/Inventory',
 
-            // File names
-            files: {
-                tickets: 'ticket_list.xlsx',
-                reports: 'repair_report.xlsx',
-                categoryMapping: 'category_mapping.json',
-                repairNotes: 'repair_notes.xlsx'
-            },
+            // Inventory file name
+            inventoryFile: 'inventory.xlsx',
 
             // API scopes
             scopes: [
@@ -729,8 +724,7 @@
 
             // Sync intervals (in milliseconds)
             syncIntervals: {
-                notes: 30000,     // 30 seconds
-                fullData: 300000  // 5 minutes
+                inventory: 300000  // 5 minutes
             }
         };
 
@@ -793,29 +787,47 @@
                 return `https://graph.microsoft.com/v1.0/sites/${SHAREPOINT_CONFIG.hostname}:${SHAREPOINT_CONFIG.sitePath}:`;
             },
 
-            // Get the drive ID for the document library
-            getDriveId: async (accessToken) => {
+            // List files in a folder
+            listFiles: async (folderPath) => {
+                const accessToken = await SharePointService.getAccessToken();
                 const baseUrl = SharePointService.getGraphBaseUrl();
-                const response = await fetch(`${baseUrl}/drive`, {
-                    headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json'
+                const path = folderPath || SHAREPOINT_CONFIG.baseFolder;
+
+                const response = await fetch(
+                    `${baseUrl}/drive/root:/${path}:/children`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': 'application/json'
+                        }
                     }
-                });
+                );
 
                 if (!response.ok) {
-                    throw new Error(`Failed to get drive: ${response.status} ${response.statusText}`);
+                    throw new Error(`Failed to list files: ${response.status}`);
                 }
 
                 const data = await response.json();
-                return data.id;
+                return data.value.filter(item =>
+                    item.name.endsWith('.xlsx') || item.name.endsWith('.xls')
+                ).map(item => ({
+                    name: item.name,
+                    size: item.size,
+                    lastModified: item.lastModifiedDateTime,
+                    id: item.id
+                }));
             },
 
-            // Read file from SharePoint
-            readFile: async (fileName) => {
+            // Read Excel file from SharePoint and return raw array data
+            readInventoryFile: async (fileName) => {
                 const accessToken = await SharePointService.getAccessToken();
                 const baseUrl = SharePointService.getGraphBaseUrl();
-                const filePath = `${SHAREPOINT_CONFIG.baseFolder}/${fileName}`;
+                const filePath = fileName ?
+                    `${SHAREPOINT_CONFIG.baseFolder}/${fileName}` :
+                    `${SHAREPOINT_CONFIG.baseFolder}/${SHAREPOINT_CONFIG.inventoryFile}`;
+
+                console.log('=== SHAREPOINT FILE READ START ===');
+                console.log('Reading file:', filePath);
 
                 const response = await fetch(
                     `${baseUrl}/drive/root:/${filePath}:/content`,
@@ -828,162 +840,28 @@
 
                 if (!response.ok) {
                     if (response.status === 404) {
-                        return null; // File doesn't exist
+                        throw new Error(`File not found: ${fileName || SHAREPOINT_CONFIG.inventoryFile}`);
                     }
-                    throw new Error(`Failed to read file ${fileName}: ${response.status}`);
+                    throw new Error(`Failed to read file: ${response.status}`);
                 }
 
-                // Return appropriate content based on file type
-                if (fileName.endsWith('.json')) {
-                    return await response.json();
-                } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-                    const arrayBuffer = await response.arrayBuffer();
-                    return new Uint8Array(arrayBuffer);
-                }
-                return await response.text();
-            },
+                const arrayBuffer = await response.arrayBuffer();
+                const data = new Uint8Array(arrayBuffer);
 
-            // Write file to SharePoint
-            writeFile: async (fileName, content) => {
-                const accessToken = await SharePointService.getAccessToken();
-                const baseUrl = SharePointService.getGraphBaseUrl();
-                const filePath = `${SHAREPOINT_CONFIG.baseFolder}/${fileName}`;
-
-                let body;
-                let contentType;
-
-                if (fileName.endsWith('.json')) {
-                    body = JSON.stringify(content, null, 2);
-                    contentType = 'application/json';
-                } else if (fileName.endsWith('.xlsx')) {
-                    // Convert to binary if needed
-                    body = content;
-                    contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-                } else {
-                    body = content;
-                    contentType = 'text/plain';
-                }
-
-                const response = await fetch(
-                    `${baseUrl}/drive/root:/${filePath}:/content`,
-                    {
-                        method: 'PUT',
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Content-Type': contentType
-                        },
-                        body: body
-                    }
-                );
-
-                if (!response.ok) {
-                    throw new Error(`Failed to write file ${fileName}: ${response.status}`);
-                }
-
-                return await response.json();
-            },
-
-            // Parse Excel file with STRICT format (blank row 1, headers row 2, data row 3+)
-            parseExcelStrict: (data) => {
+                // Parse Excel file
                 const workbook = XLSX.read(data, { type: 'array' });
+                console.log('Workbook sheets:', workbook.SheetNames);
+
                 const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
                 const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null });
 
-                // Row 2 (index 1) has headers
-                const headers = jsonData[1] || [];
-                const rows = [];
+                console.log('Parsed rows:', jsonData.length);
+                console.log('Row 1:', jsonData[0]?.slice(0, 10));
+                console.log('Row 2:', jsonData[1]?.slice(0, 10));
+                console.log('Row 3:', jsonData[2]?.slice(0, 10));
+                console.log('=== SHAREPOINT FILE READ END ===');
 
-                // Data starts at row 3 (index 2)
-                for (let i = 2; i < jsonData.length; i++) {
-                    const row = jsonData[i];
-                    if (!row || row.every(cell => cell === null || cell === '')) continue;
-
-                    const rowObj = {};
-                    headers.forEach((header, idx) => {
-                        if (header) {
-                            rowObj[String(header).trim()] = row[idx];
-                        }
-                    });
-                    rows.push(rowObj);
-                }
-
-                return { headers, rows };
-            },
-
-            // Parse Excel file with FLEXIBLE format (auto-detect headers)
-            parseExcelFlexible: (data, preferredSheet = 'Repair Notes') => {
-                const workbook = XLSX.read(data, { type: 'array' });
-
-                // Try to find preferred sheet, fallback to first
-                let sheetName = workbook.SheetNames[0];
-                if (workbook.SheetNames.includes(preferredSheet)) {
-                    sheetName = preferredSheet;
-                }
-
-                const sheet = workbook.Sheets[sheetName];
-                const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-
-                // Find header row by looking for "Barcode#" or "Barcode"
-                let headerRowIdx = -1;
-                for (let i = 0; i < Math.min(10, jsonData.length); i++) {
-                    const row = jsonData[i];
-                    if (row && row.some(cell =>
-                        cell && (String(cell).includes('Barcode#') || String(cell).toLowerCase() === 'barcode')
-                    )) {
-                        headerRowIdx = i;
-                        break;
-                    }
-                }
-
-                if (headerRowIdx === -1) {
-                    // Default to row 0 if no barcode header found
-                    headerRowIdx = 0;
-                }
-
-                const headers = jsonData[headerRowIdx] || [];
-                const rows = [];
-
-                for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
-                    const row = jsonData[i];
-                    if (!row || row.every(cell => cell === null || cell === '')) continue;
-
-                    const rowObj = {};
-                    headers.forEach((header, idx) => {
-                        if (header) {
-                            rowObj[String(header).trim()] = row[idx];
-                        }
-                    });
-                    rows.push(rowObj);
-                }
-
-                return { headers, rows, sheetName };
-            },
-
-            // Create Excel file for repair notes
-            createRepairNotesExcel: (notes) => {
-                const headers = ['Barcode#', 'Meeting Note', 'Requires Follow Up', 'Last Updated'];
-                const data = [headers];
-
-                notes.forEach(note => {
-                    data.push([
-                        note.barcode || '',
-                        note.meetingNote || '',
-                        note.requiresFollowUp || '',
-                        note.lastUpdated || new Date().toISOString()
-                    ]);
-                });
-
-                const worksheet = XLSX.utils.aoa_to_sheet(data);
-                const workbook = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(workbook, worksheet, 'Repair Notes');
-
-                return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
-            },
-
-            // Normalize barcode (trimmed, uppercase)
-            normalizeBarcode: (barcode) => {
-                if (!barcode) return '';
-                return String(barcode).trim().toUpperCase();
+                return jsonData;
             }
         };
 
@@ -1150,20 +1028,16 @@
             // SharePoint integration state
             const [isAuthenticated, setIsAuthenticated] = useState(false);
             const [userAccount, setUserAccount] = useState(null);
-            const [spTickets, setSpTickets] = useState(null);
-            const [spReports, setSpReports] = useState(null);
-            const [spCategoryMapping, setSpCategoryMapping] = useState(null);
-            const [spRepairNotes, setSpRepairNotes] = useState(null);
-            const [spSyncStatus, setSpSyncStatus] = useState({
-                tickets: { lastSync: null, error: null },
-                reports: { lastSync: null, error: null },
-                categoryMapping: { lastSync: null, error: null },
-                repairNotes: { lastSync: null, error: null }
+            const [spInventorySyncStatus, setSpInventorySyncStatus] = useState({
+                lastSync: null,
+                error: null,
+                fileName: null
             });
+            const [spAvailableFiles, setSpAvailableFiles] = useState([]);
+            const [selectedSpFile, setSelectedSpFile] = useState('');
             const [isSyncing, setIsSyncing] = useState(false);
-            const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+            const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
             const syncIntervalRef = useRef(null);
-            const notesSyncIntervalRef = useRef(null);
 
             useEffect(() => {
                 // Load equipment weights from localStorage
@@ -1200,32 +1074,28 @@
                 }
             }, []);
 
-            // Auto-sync setup
+            // Auto-sync setup for inventory
             useEffect(() => {
-                if (isAuthenticated && autoSyncEnabled) {
-                    // Full data sync every 5 minutes
+                if (isAuthenticated && autoSyncEnabled && selectedSpFile) {
+                    // Inventory sync every 5 minutes
                     syncIntervalRef.current = setInterval(() => {
-                        syncAllSharePointData();
-                    }, SHAREPOINT_CONFIG.syncIntervals.fullData);
-
-                    // Notes sync every 30 seconds
-                    notesSyncIntervalRef.current = setInterval(() => {
-                        syncRepairNotes();
-                    }, SHAREPOINT_CONFIG.syncIntervals.notes);
-
-                    // Initial sync
-                    syncAllSharePointData();
+                        loadInventoryFromSharePoint(selectedSpFile);
+                    }, SHAREPOINT_CONFIG.syncIntervals.inventory);
                 }
 
                 return () => {
                     if (syncIntervalRef.current) {
                         clearInterval(syncIntervalRef.current);
                     }
-                    if (notesSyncIntervalRef.current) {
-                        clearInterval(notesSyncIntervalRef.current);
-                    }
                 };
-            }, [isAuthenticated, autoSyncEnabled]);
+            }, [isAuthenticated, autoSyncEnabled, selectedSpFile]);
+
+            // Load available files when authenticated
+            useEffect(() => {
+                if (isAuthenticated) {
+                    loadAvailableFiles();
+                }
+            }, [isAuthenticated]);
 
             // SharePoint Authentication Functions
             const handleLogin = async () => {
@@ -1255,196 +1125,76 @@
                     await msalInstance.logoutPopup();
                     setIsAuthenticated(false);
                     setUserAccount(null);
-                    setSpTickets(null);
-                    setSpReports(null);
-                    setSpCategoryMapping(null);
-                    setSpRepairNotes(null);
+                    setSpAvailableFiles([]);
+                    setSelectedSpFile('');
+                    setSpInventorySyncStatus({ lastSync: null, error: null, fileName: null });
                     showToast('Logged out successfully', 'success');
                 } catch (error) {
                     console.error('Logout error:', error);
                 }
             };
 
-            // SharePoint Sync Functions
-            const syncTickets = async () => {
+            // Load list of available inventory files from SharePoint
+            const loadAvailableFiles = async () => {
                 try {
-                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.tickets);
-                    if (data) {
-                        const parsed = SharePointService.parseExcelStrict(data);
-                        setSpTickets(parsed);
-                        setSpSyncStatus(prev => ({
-                            ...prev,
-                            tickets: { lastSync: new Date().toISOString(), error: null }
-                        }));
-                        return parsed;
-                    }
+                    const files = await SharePointService.listFiles();
+                    setSpAvailableFiles(files);
+                    console.log('Available SharePoint files:', files);
                 } catch (error) {
-                    console.error('Tickets sync error:', error);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        tickets: { ...prev.tickets, error: error.message }
-                    }));
+                    console.error('Error listing files:', error);
+                    showToast(`Could not list files: ${error.message}`, 'error');
                 }
-                return null;
             };
 
-            const syncReports = async () => {
-                try {
-                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.reports);
-                    if (data) {
-                        const parsed = SharePointService.parseExcelStrict(data);
-                        setSpReports(parsed);
-                        setSpSyncStatus(prev => ({
-                            ...prev,
-                            reports: { lastSync: new Date().toISOString(), error: null }
-                        }));
-                        return parsed;
-                    }
-                } catch (error) {
-                    console.error('Reports sync error:', error);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        reports: { ...prev.reports, error: error.message }
-                    }));
+            // Load inventory data from SharePoint
+            const loadInventoryFromSharePoint = async (fileName) => {
+                if (!isAuthenticated) {
+                    showToast('Please sign in to SharePoint first', 'warning');
+                    return;
                 }
-                return null;
-            };
-
-            const syncCategoryMapping = async () => {
-                try {
-                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.categoryMapping);
-                    if (data) {
-                        setSpCategoryMapping(data);
-                        setSpSyncStatus(prev => ({
-                            ...prev,
-                            categoryMapping: { lastSync: new Date().toISOString(), error: null }
-                        }));
-                        return data;
-                    }
-                } catch (error) {
-                    console.error('Category mapping sync error:', error);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        categoryMapping: { ...prev.categoryMapping, error: error.message }
-                    }));
-                }
-                return null;
-            };
-
-            const syncRepairNotes = async () => {
-                try {
-                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.repairNotes);
-                    if (data) {
-                        const parsed = SharePointService.parseExcelFlexible(data, 'Repair Notes');
-                        setSpRepairNotes(parsed);
-                        setSpSyncStatus(prev => ({
-                            ...prev,
-                            repairNotes: { lastSync: new Date().toISOString(), error: null }
-                        }));
-                        return parsed;
-                    }
-                } catch (error) {
-                    console.error('Repair notes sync error:', error);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        repairNotes: { ...prev.repairNotes, error: error.message }
-                    }));
-                }
-                return null;
-            };
-
-            const syncAllSharePointData = async () => {
-                if (!isAuthenticated || isSyncing) return;
 
                 setIsSyncing(true);
-                showToast('Syncing SharePoint data...', 'success');
+                showToast(`Loading inventory from SharePoint...`, 'success');
 
                 try {
-                    await Promise.all([
-                        syncTickets(),
-                        syncReports(),
-                        syncCategoryMapping(),
-                        syncRepairNotes()
-                    ]);
-                    showToast('SharePoint sync complete!', 'success');
+                    const jsonData = await SharePointService.readInventoryFile(fileName);
+
+                    if (!jsonData || jsonData.length < 4) {
+                        throw new Error('File appears to be empty or invalid');
+                    }
+
+                    // Check if this is Rentex format
+                    const isRentexFormat = jsonData[2] &&
+                        jsonData[2].some(cell => cell && String(cell).toLowerCase().includes('equipment')) &&
+                        jsonData[2].some(cell => cell && String(cell).toLowerCase().includes('location'));
+
+                    // Set the excel data (same format as local file upload)
+                    setExcelData(jsonData);
+                    setExcelFile({ name: fileName, fromSharePoint: true });
+
+                    setSpInventorySyncStatus({
+                        lastSync: new Date().toISOString(),
+                        error: null,
+                        fileName: fileName
+                    });
+
+                    if (isRentexFormat) {
+                        showToast(`Loaded Rentex inventory from SharePoint: ${fileName}`, 'success');
+                    } else {
+                        showToast(`Loaded inventory from SharePoint: ${fileName}`, 'success');
+                    }
+
+                    setActiveTab('optimize');
                 } catch (error) {
-                    console.error('Sync error:', error);
-                    showToast(`Sync error: ${error.message}`, 'error');
+                    console.error('SharePoint inventory load error:', error);
+                    setSpInventorySyncStatus(prev => ({
+                        ...prev,
+                        error: error.message
+                    }));
+                    showToast(`Failed to load inventory: ${error.message}`, 'error');
                 } finally {
                     setIsSyncing(false);
                 }
-            };
-
-            // Save category mapping to SharePoint
-            const saveCategoryMapping = async (newMapping) => {
-                try {
-                    await SharePointService.writeFile(SHAREPOINT_CONFIG.files.categoryMapping, newMapping);
-                    setSpCategoryMapping(newMapping);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        categoryMapping: { lastSync: new Date().toISOString(), error: null }
-                    }));
-                    showToast('Category mapping saved to SharePoint', 'success');
-                } catch (error) {
-                    console.error('Save category mapping error:', error);
-                    showToast(`Failed to save: ${error.message}`, 'error');
-                }
-            };
-
-            // Save repair notes to SharePoint
-            const saveRepairNotes = async (notes) => {
-                try {
-                    const excelData = SharePointService.createRepairNotesExcel(notes);
-                    await SharePointService.writeFile(SHAREPOINT_CONFIG.files.repairNotes, excelData);
-                    setSpSyncStatus(prev => ({
-                        ...prev,
-                        repairNotes: { lastSync: new Date().toISOString(), error: null }
-                    }));
-                    showToast('Repair notes saved to SharePoint', 'success');
-                } catch (error) {
-                    console.error('Save repair notes error:', error);
-                    showToast(`Failed to save notes: ${error.message}`, 'error');
-                }
-            };
-
-            // Update a single repair note
-            const updateRepairNote = async (barcode, updates) => {
-                if (!spRepairNotes) return;
-
-                const normalizedBarcode = SharePointService.normalizeBarcode(barcode);
-                const notes = spRepairNotes.rows.map(row => {
-                    const rowBarcode = SharePointService.normalizeBarcode(
-                        row['Barcode#'] || row['Barcode']
-                    );
-                    if (rowBarcode === normalizedBarcode) {
-                        return {
-                            barcode: normalizedBarcode,
-                            meetingNote: updates.meetingNote !== undefined ? updates.meetingNote : (row['Meeting Note'] || ''),
-                            requiresFollowUp: updates.requiresFollowUp !== undefined ? updates.requiresFollowUp : (row['Requires Follow Up'] || ''),
-                            lastUpdated: new Date().toISOString()
-                        };
-                    }
-                    return {
-                        barcode: rowBarcode,
-                        meetingNote: row['Meeting Note'] || '',
-                        requiresFollowUp: row['Requires Follow Up'] || '',
-                        lastUpdated: row['Last Updated'] || ''
-                    };
-                });
-
-                // Add new note if not found
-                const exists = notes.some(n => n.barcode === normalizedBarcode);
-                if (!exists) {
-                    notes.push({
-                        barcode: normalizedBarcode,
-                        meetingNote: updates.meetingNote || '',
-                        requiresFollowUp: updates.requiresFollowUp || '',
-                        lastUpdated: new Date().toISOString()
-                    });
-                }
-
-                await saveRepairNotes(notes);
-                await syncRepairNotes();
             };
 
             const showToast = (message, type = 'success') => {
@@ -2533,14 +2283,74 @@
                         </p>
                         {excelFile && <div className="file-name">✓ {excelFile.name}</div>}
                     </div>
-                    <input 
+                    <input
                         ref={fileInputRef}
-                        type="file" 
+                        type="file"
                         accept=".xlsx,.xls"
                         onChange={(e) => handleFileUpload(e.target.files[0])}
                         style={{ display: 'none' }}
                     />
-                    
+
+                    {/* SharePoint Option */}
+                    <div style={{
+                        marginTop: '2rem',
+                        padding: '1.5rem',
+                        background: 'rgba(0, 120, 212, 0.1)',
+                        borderRadius: '12px',
+                        border: '1px dashed rgba(0, 120, 212, 0.5)',
+                        textAlign: 'center'
+                    }}>
+                        <div style={{ marginBottom: '1rem' }}>
+                            <span style={{ fontSize: '2rem' }}>☁️</span>
+                        </div>
+                        <h3 style={{ marginBottom: '0.5rem' }}>Or load from SharePoint</h3>
+                        <p style={{ color: 'var(--text-secondary)', marginBottom: '1rem', fontSize: '0.9rem' }}>
+                            {isAuthenticated
+                                ? 'Load inventory directly from your SharePoint site'
+                                : 'Sign in with Microsoft to access SharePoint files'}
+                        </p>
+                        {isAuthenticated ? (
+                            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <select
+                                    className="form-select"
+                                    value={selectedSpFile}
+                                    onChange={(e) => setSelectedSpFile(e.target.value)}
+                                    style={{ minWidth: '200px', maxWidth: '300px' }}
+                                >
+                                    <option value="">-- Select file --</option>
+                                    {spAvailableFiles.map((file, idx) => (
+                                        <option key={idx} value={file.name}>{file.name}</option>
+                                    ))}
+                                </select>
+                                <button
+                                    className="btn"
+                                    onClick={() => loadInventoryFromSharePoint(selectedSpFile)}
+                                    disabled={!selectedSpFile || isSyncing}
+                                    style={{ background: '#0078d4' }}
+                                >
+                                    {isSyncing ? (
+                                        <><span className="loading"></span> Loading...</>
+                                    ) : (
+                                        <>☁️ Load from SharePoint</>
+                                    )}
+                                </button>
+                            </div>
+                        ) : (
+                            <button
+                                className="btn"
+                                onClick={handleLogin}
+                                style={{ background: '#0078d4' }}
+                            >
+                                🔑 Sign in with Microsoft
+                            </button>
+                        )}
+                        {excelFile?.fromSharePoint && (
+                            <p style={{ marginTop: '1rem', color: 'var(--success)', fontWeight: 600 }}>
+                                ✓ Loaded from SharePoint: {excelFile.name}
+                            </p>
+                        )}
+                    </div>
+
                     {excelData && (
                         <div style={{ marginTop: '2rem' }}>
                             <h3 style={{ marginBottom: '1rem' }}>📋 Preview</h3>
@@ -3603,29 +3413,6 @@
                     return date.toLocaleString();
                 };
 
-                const SyncStatusCard = ({ title, status, icon }) => (
-                    <div className="stat-card" style={{ minWidth: '200px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontSize: '1.5rem' }}>{icon}</span>
-                            {status.error ? (
-                                <span className="api-status disconnected" style={{ fontSize: '0.7rem' }}>Error</span>
-                            ) : status.lastSync ? (
-                                <span className="api-status connected" style={{ fontSize: '0.7rem' }}>Synced</span>
-                            ) : (
-                                <span className="api-status" style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', color: 'var(--text-secondary)' }}>Pending</span>
-                            )}
-                        </div>
-                        <div className="stat-label" style={{ marginTop: '0.5rem' }}>{title}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                            {status.error ? (
-                                <span style={{ color: 'var(--error)' }}>{status.error}</span>
-                            ) : (
-                                formatLastSync(status.lastSync)
-                            )}
-                        </div>
-                    </div>
-                );
-
                 return (
                     <div>
                         {/* Authentication Card */}
@@ -3635,7 +3422,7 @@
                             {!isAuthenticated ? (
                                 <div style={{ textAlign: 'center', padding: '2rem' }}>
                                     <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-                                        Connect to SharePoint to sync repair tracker data
+                                        Connect to SharePoint to load inventory data directly from the cloud
                                     </p>
                                     <button className="btn btn-success" onClick={handleLogin} style={{ fontSize: '1.1rem', padding: '1rem 2rem' }}>
                                         🔑 Sign in with Microsoft
@@ -3661,189 +3448,157 @@
                                             Sign Out
                                         </button>
                                     </div>
-
-                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                        <button
-                                            className="btn"
-                                            onClick={syncAllSharePointData}
-                                            disabled={isSyncing}
-                                        >
-                                            {isSyncing ? (
-                                                <><span className="loading"></span> Syncing...</>
-                                            ) : (
-                                                <>🔄 Sync All Data</>
-                                            )}
-                                        </button>
-
-                                        <div className="checkbox-wrapper" style={{ margin: 0 }}>
-                                            <input
-                                                type="checkbox"
-                                                checked={autoSyncEnabled}
-                                                onChange={(e) => setAutoSyncEnabled(e.target.checked)}
-                                                id="auto-sync"
-                                            />
-                                            <label htmlFor="auto-sync">
-                                                Auto-sync enabled
-                                            </label>
-                                        </div>
-                                    </div>
                                 </div>
                             )}
                         </div>
 
-                        {/* Sync Status Card */}
+                        {/* Inventory Sync Card */}
                         {isAuthenticated && (
                             <div className="card">
-                                <h2 className="card-title">📊 Sync Status</h2>
+                                <h2 className="card-title">📦 Load Inventory from SharePoint</h2>
+
+                                {/* File Selection */}
+                                <div className="form-group">
+                                    <label className="form-label">Select Inventory File</label>
+                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <select
+                                            className="form-select"
+                                            value={selectedSpFile}
+                                            onChange={(e) => setSelectedSpFile(e.target.value)}
+                                            style={{ flex: 1, minWidth: '200px' }}
+                                        >
+                                            <option value="">-- Select a file --</option>
+                                            {spAvailableFiles.map((file, idx) => (
+                                                <option key={idx} value={file.name}>
+                                                    {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <button
+                                            className="btn btn-secondary"
+                                            onClick={loadAvailableFiles}
+                                            disabled={isSyncing}
+                                            title="Refresh file list"
+                                        >
+                                            🔄 Refresh
+                                        </button>
+                                    </div>
+                                    {spAvailableFiles.length === 0 && (
+                                        <p style={{ marginTop: '0.5rem', color: 'var(--warning)', fontSize: '0.85rem' }}>
+                                            No Excel files found in {SHAREPOINT_CONFIG.baseFolder}. Click Refresh to reload.
+                                        </p>
+                                    )}
+                                </div>
+
+                                {/* Load Button */}
+                                <div style={{ marginTop: '1.5rem' }}>
+                                    <button
+                                        className="btn btn-success"
+                                        onClick={() => loadInventoryFromSharePoint(selectedSpFile)}
+                                        disabled={!selectedSpFile || isSyncing}
+                                        style={{ fontSize: '1.1rem', padding: '1rem 2rem' }}
+                                    >
+                                        {isSyncing ? (
+                                            <><span className="loading"></span> Loading...</>
+                                        ) : (
+                                            <>☁️ Load Inventory from SharePoint</>
+                                        )}
+                                    </button>
+                                </div>
+
+                                {/* Auto-sync option */}
+                                {selectedSpFile && (
+                                    <div className="checkbox-wrapper" style={{ marginTop: '1.5rem' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={autoSyncEnabled}
+                                            onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                                            id="auto-sync"
+                                        />
+                                        <label htmlFor="auto-sync">
+                                            Auto-refresh inventory every 5 minutes
+                                        </label>
+                                    </div>
+                                )}
+
+                                {/* Sync Status */}
+                                {spInventorySyncStatus.lastSync && (
+                                    <div style={{
+                                        marginTop: '1.5rem',
+                                        padding: '1rem',
+                                        background: spInventorySyncStatus.error ? 'rgba(244, 67, 54, 0.1)' : 'rgba(76, 175, 80, 0.1)',
+                                        borderRadius: '8px',
+                                        border: `1px solid ${spInventorySyncStatus.error ? 'var(--error)' : 'var(--success)'}`
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                            <span style={{ fontSize: '1.2rem' }}>
+                                                {spInventorySyncStatus.error ? '❌' : '✅'}
+                                            </span>
+                                            <div>
+                                                <strong style={{ color: spInventorySyncStatus.error ? 'var(--error)' : 'var(--success)' }}>
+                                                    {spInventorySyncStatus.error ? 'Sync Error' : 'Inventory Loaded'}
+                                                </strong>
+                                                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0 0' }}>
+                                                    {spInventorySyncStatus.error || (
+                                                        <>File: {spInventorySyncStatus.fileName} | Last sync: {formatLastSync(spInventorySyncStatus.lastSync)}</>
+                                                    )}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Current Inventory Status */}
+                        {isAuthenticated && excelData && excelFile?.fromSharePoint && (
+                            <div className="card">
+                                <h2 className="card-title">📊 Current Inventory Data</h2>
                                 <div className="stats-grid">
-                                    <SyncStatusCard
-                                        title="Ticket List"
-                                        status={spSyncStatus.tickets}
-                                        icon="🎫"
-                                    />
-                                    <SyncStatusCard
-                                        title="Repair Reports"
-                                        status={spSyncStatus.reports}
-                                        icon="📋"
-                                    />
-                                    <SyncStatusCard
-                                        title="Category Mapping"
-                                        status={spSyncStatus.categoryMapping}
-                                        icon="🏷️"
-                                    />
-                                    <SyncStatusCard
-                                        title="Repair Notes"
-                                        status={spSyncStatus.repairNotes}
-                                        icon="📝"
-                                    />
+                                    <div className="stat-card">
+                                        <div className="stat-label">Source</div>
+                                        <div className="stat-value" style={{ fontSize: '1.2rem' }}>
+                                            ☁️ SharePoint
+                                        </div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-label">File</div>
+                                        <div className="stat-value" style={{ fontSize: '1rem' }}>
+                                            {excelFile.name}
+                                        </div>
+                                    </div>
+                                    <div className="stat-card">
+                                        <div className="stat-label">Rows</div>
+                                        <div className="stat-value">
+                                            {excelData.length}
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                    <p>Full sync: Every 5 minutes | Notes sync: Every 30 seconds</p>
-                                </div>
-                            </div>
-                        )}
-
-                        {/* Data Preview Cards */}
-                        {isAuthenticated && spTickets && (
-                            <div className="card">
-                                <h2 className="card-title">🎫 Tickets ({spTickets.rows.length} records)</h2>
-                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                                    <table className="data-table">
-                                        <thead>
-                                            <tr>
-                                                {spTickets.headers.slice(0, 6).map((header, idx) => (
-                                                    <th key={idx}>{header}</th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {spTickets.rows.slice(0, 10).map((row, idx) => (
-                                                <tr key={idx}>
-                                                    {spTickets.headers.slice(0, 6).map((header, hidx) => (
-                                                        <td key={hidx}>{row[header] || '-'}</td>
+                                {/* Data Preview */}
+                                <div style={{ marginTop: '1.5rem' }}>
+                                    <h3 style={{ marginBottom: '1rem', color: 'var(--secondary)' }}>Data Preview (First 5 rows)</h3>
+                                    <div className="table-container" style={{ maxHeight: '250px', overflowY: 'auto' }}>
+                                        <table className="data-table">
+                                            <thead>
+                                                <tr>
+                                                    {(excelData[2] || excelData[0] || []).slice(0, 8).map((header, idx) => (
+                                                        <th key={idx}>{header || `Col ${idx + 1}`}</th>
                                                     ))}
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {spTickets.rows.length > 10 && (
-                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        Showing 10 of {spTickets.rows.length} records
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        {isAuthenticated && spReports && (
-                            <div className="card">
-                                <h2 className="card-title">📋 Repair Reports ({spReports.rows.length} records)</h2>
-                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                                    <table className="data-table">
-                                        <thead>
-                                            <tr>
-                                                {spReports.headers.slice(0, 6).map((header, idx) => (
-                                                    <th key={idx}>{header}</th>
+                                            </thead>
+                                            <tbody>
+                                                {excelData.slice(3, 8).map((row, idx) => (
+                                                    <tr key={idx}>
+                                                        {(row || []).slice(0, 8).map((cell, cidx) => (
+                                                            <td key={cidx}>{cell || '-'}</td>
+                                                        ))}
+                                                    </tr>
                                                 ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {spReports.rows.slice(0, 10).map((row, idx) => (
-                                                <tr key={idx}>
-                                                    {spReports.headers.slice(0, 6).map((header, hidx) => (
-                                                        <td key={hidx}>{row[header] || '-'}</td>
-                                                    ))}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
-                                {spReports.rows.length > 10 && (
-                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        Showing 10 of {spReports.rows.length} records
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        {isAuthenticated && spCategoryMapping && (
-                            <div className="card">
-                                <h2 className="card-title">🏷️ Category Mapping</h2>
-                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                                    <table className="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Category</th>
-                                                <th>Product Manager</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {Object.entries(spCategoryMapping).slice(0, 10).map(([category, pm], idx) => (
-                                                <tr key={idx}>
-                                                    <td>{category}</td>
-                                                    <td>{pm}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {Object.keys(spCategoryMapping).length > 10 && (
-                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        Showing 10 of {Object.keys(spCategoryMapping).length} mappings
-                                    </p>
-                                )}
-                            </div>
-                        )}
-
-                        {isAuthenticated && spRepairNotes && (
-                            <div className="card">
-                                <h2 className="card-title">📝 Repair Notes ({spRepairNotes.rows.length} records)</h2>
-                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
-                                    <table className="data-table">
-                                        <thead>
-                                            <tr>
-                                                {spRepairNotes.headers.map((header, idx) => (
-                                                    <th key={idx}>{header}</th>
-                                                ))}
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {spRepairNotes.rows.slice(0, 10).map((row, idx) => (
-                                                <tr key={idx}>
-                                                    {spRepairNotes.headers.map((header, hidx) => (
-                                                        <td key={hidx}>{row[header] || '-'}</td>
-                                                    ))}
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                {spRepairNotes.rows.length > 10 && (
-                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                                        Showing 10 of {spRepairNotes.rows.length} records
-                                    </p>
-                                )}
                             </div>
                         )}
 
@@ -3856,17 +3611,12 @@
                                     <span>{SHAREPOINT_CONFIG.hostname}{SHAREPOINT_CONFIG.sitePath}</span>
                                 </div>
                                 <div style={{ marginBottom: '0.75rem' }}>
-                                    <span style={{ color: 'var(--text-secondary)' }}>Base Folder:</span>{' '}
+                                    <span style={{ color: 'var(--text-secondary)' }}>Inventory Folder:</span>{' '}
                                     <span>{SHAREPOINT_CONFIG.baseFolder}</span>
                                 </div>
                                 <div style={{ marginBottom: '0.75rem' }}>
-                                    <span style={{ color: 'var(--text-secondary)' }}>Files:</span>
-                                    <ul style={{ marginTop: '0.5rem', listStyle: 'none', paddingLeft: '1rem' }}>
-                                        <li>📊 {SHAREPOINT_CONFIG.files.tickets} (Read)</li>
-                                        <li>📊 {SHAREPOINT_CONFIG.files.reports} (Read)</li>
-                                        <li>📄 {SHAREPOINT_CONFIG.files.categoryMapping} (Read/Write)</li>
-                                        <li>📊 {SHAREPOINT_CONFIG.files.repairNotes} (Read/Write)</li>
-                                    </ul>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Default File:</span>{' '}
+                                    <span>{SHAREPOINT_CONFIG.inventoryFile}</span>
                                 </div>
                                 <div>
                                     <span style={{ color: 'var(--text-secondary)' }}>Client ID:</span>{' '}
