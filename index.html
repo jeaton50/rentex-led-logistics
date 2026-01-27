@@ -1155,8 +1155,16 @@
                 }
             }, [isAuthenticated]);
 
+            // Track if login is in progress to prevent double-clicks
+            const [isLoggingIn, setIsLoggingIn] = useState(false);
+
             // SharePoint Authentication Functions
             const handleLogin = async () => {
+                if (isLoggingIn) {
+                    showToast('Login already in progress...', 'warning');
+                    return;
+                }
+
                 if (!spConfigForm.clientId || !spConfigForm.tenantId) {
                     showToast('Please configure Client ID and Tenant ID first in the SharePoint tab', 'error');
                     setActiveTab('sharepoint');
@@ -1172,9 +1180,23 @@
                     }
                 }
 
+                setIsLoggingIn(true);
+
                 try {
+                    // Check if there's already an interaction in progress
+                    const accounts = msalInstance.getAllAccounts();
+                    if (accounts.length > 0) {
+                        // Already have an account, just use it
+                        setIsAuthenticated(true);
+                        setUserAccount(accounts[0]);
+                        showToast(`Welcome back, ${accounts[0].name}!`, 'success');
+                        setIsLoggingIn(false);
+                        return;
+                    }
+
                     const loginRequest = {
-                        scopes: SHAREPOINT_CONFIG.scopes
+                        scopes: SHAREPOINT_CONFIG.scopes,
+                        prompt: 'select_account'  // Force account selection
                     };
                     const response = await msalInstance.loginPopup(loginRequest);
                     setIsAuthenticated(true);
@@ -1184,11 +1206,22 @@
                     console.error('Login error:', error);
                     if (error.errorCode === 'user_cancelled') {
                         showToast('Sign-in was cancelled', 'warning');
+                    } else if (error.errorCode === 'interaction_in_progress') {
+                        showToast('Another sign-in is in progress. Please wait or refresh the page.', 'warning');
+                        // Try to clear stuck state
+                        try {
+                            // Clear browser interaction state
+                            sessionStorage.removeItem('msal.interaction.status');
+                        } catch (e) {}
+                    } else if (error.errorCode === 'popup_window_error') {
+                        showToast('Popup was blocked. Please allow popups for this site.', 'error');
                     } else if (error.message?.includes('AADSTS')) {
                         showToast('Authentication error. Please verify your Client ID and Tenant ID are correct.', 'error');
                     } else {
                         showToast(`Login failed: ${error.message}`, 'error');
                     }
+                } finally {
+                    setIsLoggingIn(false);
                 }
             };
 
