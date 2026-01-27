@@ -8,6 +8,8 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <!-- MSAL for Microsoft Authentication -->
+    <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -689,7 +691,301 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useCallback } = React;
+
+        // ============================================
+        // SHAREPOINT CONFIGURATION
+        // ============================================
+        const SHAREPOINT_CONFIG = {
+            // Microsoft Entra ID (Azure AD) settings
+            clientId: '5764301a-9d69-4b4e-8bb6-83dbd4215e24',
+            tenantId: 'b958ba39-da13-4553-a009-35b1649f44eb',
+            authority: 'https://login.microsoftonline.com/b958ba39-da13-4553-a009-35b1649f44eb',
+            redirectUri: window.location.origin + window.location.pathname,
+
+            // SharePoint site settings (can be overridden via environment)
+            hostname: 'rentexinc.sharepoint.com',
+            sitePath: '/sites/ProductManagers',
+            baseFolder: 'General/Repairs/RepairTracker',
+
+            // File names
+            files: {
+                tickets: 'ticket_list.xlsx',
+                reports: 'repair_report.xlsx',
+                categoryMapping: 'category_mapping.json',
+                repairNotes: 'repair_notes.xlsx'
+            },
+
+            // API scopes
+            scopes: [
+                'openid',
+                'profile',
+                'email',
+                'offline_access',
+                'User.Read',
+                'Files.ReadWrite.All',
+                'Sites.ReadWrite.All'
+            ],
+
+            // Sync intervals (in milliseconds)
+            syncIntervals: {
+                notes: 30000,     // 30 seconds
+                fullData: 300000  // 5 minutes
+            }
+        };
+
+        // MSAL Configuration
+        const msalConfig = {
+            auth: {
+                clientId: SHAREPOINT_CONFIG.clientId,
+                authority: SHAREPOINT_CONFIG.authority,
+                redirectUri: SHAREPOINT_CONFIG.redirectUri,
+                postLogoutRedirectUri: SHAREPOINT_CONFIG.redirectUri
+            },
+            cache: {
+                cacheLocation: 'localStorage',
+                storeAuthStateInCookie: false
+            }
+        };
+
+        // Initialize MSAL instance
+        let msalInstance = null;
+        try {
+            msalInstance = new msal.PublicClientApplication(msalConfig);
+        } catch (error) {
+            console.error('MSAL initialization error:', error);
+        }
+
+        // ============================================
+        // SHAREPOINT SERVICE
+        // ============================================
+        const SharePointService = {
+            // Get access token
+            getAccessToken: async () => {
+                if (!msalInstance) {
+                    throw new Error('MSAL not initialized');
+                }
+
+                const accounts = msalInstance.getAllAccounts();
+                if (accounts.length === 0) {
+                    throw new Error('No authenticated user');
+                }
+
+                const request = {
+                    scopes: SHAREPOINT_CONFIG.scopes,
+                    account: accounts[0]
+                };
+
+                try {
+                    const response = await msalInstance.acquireTokenSilent(request);
+                    return response.accessToken;
+                } catch (error) {
+                    if (error instanceof msal.InteractionRequiredAuthError) {
+                        const response = await msalInstance.acquireTokenPopup(request);
+                        return response.accessToken;
+                    }
+                    throw error;
+                }
+            },
+
+            // Get Graph API base URL for the SharePoint site
+            getGraphBaseUrl: () => {
+                return `https://graph.microsoft.com/v1.0/sites/${SHAREPOINT_CONFIG.hostname}:${SHAREPOINT_CONFIG.sitePath}:`;
+            },
+
+            // Get the drive ID for the document library
+            getDriveId: async (accessToken) => {
+                const baseUrl = SharePointService.getGraphBaseUrl();
+                const response = await fetch(`${baseUrl}/drive`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to get drive: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                return data.id;
+            },
+
+            // Read file from SharePoint
+            readFile: async (fileName) => {
+                const accessToken = await SharePointService.getAccessToken();
+                const baseUrl = SharePointService.getGraphBaseUrl();
+                const filePath = `${SHAREPOINT_CONFIG.baseFolder}/${fileName}`;
+
+                const response = await fetch(
+                    `${baseUrl}/drive/root:/${filePath}:/content`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        return null; // File doesn't exist
+                    }
+                    throw new Error(`Failed to read file ${fileName}: ${response.status}`);
+                }
+
+                // Return appropriate content based on file type
+                if (fileName.endsWith('.json')) {
+                    return await response.json();
+                } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+                    const arrayBuffer = await response.arrayBuffer();
+                    return new Uint8Array(arrayBuffer);
+                }
+                return await response.text();
+            },
+
+            // Write file to SharePoint
+            writeFile: async (fileName, content) => {
+                const accessToken = await SharePointService.getAccessToken();
+                const baseUrl = SharePointService.getGraphBaseUrl();
+                const filePath = `${SHAREPOINT_CONFIG.baseFolder}/${fileName}`;
+
+                let body;
+                let contentType;
+
+                if (fileName.endsWith('.json')) {
+                    body = JSON.stringify(content, null, 2);
+                    contentType = 'application/json';
+                } else if (fileName.endsWith('.xlsx')) {
+                    // Convert to binary if needed
+                    body = content;
+                    contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+                } else {
+                    body = content;
+                    contentType = 'text/plain';
+                }
+
+                const response = await fetch(
+                    `${baseUrl}/drive/root:/${filePath}:/content`,
+                    {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}`,
+                            'Content-Type': contentType
+                        },
+                        body: body
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`Failed to write file ${fileName}: ${response.status}`);
+                }
+
+                return await response.json();
+            },
+
+            // Parse Excel file with STRICT format (blank row 1, headers row 2, data row 3+)
+            parseExcelStrict: (data) => {
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null });
+
+                // Row 2 (index 1) has headers
+                const headers = jsonData[1] || [];
+                const rows = [];
+
+                // Data starts at row 3 (index 2)
+                for (let i = 2; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.every(cell => cell === null || cell === '')) continue;
+
+                    const rowObj = {};
+                    headers.forEach((header, idx) => {
+                        if (header) {
+                            rowObj[String(header).trim()] = row[idx];
+                        }
+                    });
+                    rows.push(rowObj);
+                }
+
+                return { headers, rows };
+            },
+
+            // Parse Excel file with FLEXIBLE format (auto-detect headers)
+            parseExcelFlexible: (data, preferredSheet = 'Repair Notes') => {
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                // Try to find preferred sheet, fallback to first
+                let sheetName = workbook.SheetNames[0];
+                if (workbook.SheetNames.includes(preferredSheet)) {
+                    sheetName = preferredSheet;
+                }
+
+                const sheet = workbook.Sheets[sheetName];
+                const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+
+                // Find header row by looking for "Barcode#" or "Barcode"
+                let headerRowIdx = -1;
+                for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+                    const row = jsonData[i];
+                    if (row && row.some(cell =>
+                        cell && (String(cell).includes('Barcode#') || String(cell).toLowerCase() === 'barcode')
+                    )) {
+                        headerRowIdx = i;
+                        break;
+                    }
+                }
+
+                if (headerRowIdx === -1) {
+                    // Default to row 0 if no barcode header found
+                    headerRowIdx = 0;
+                }
+
+                const headers = jsonData[headerRowIdx] || [];
+                const rows = [];
+
+                for (let i = headerRowIdx + 1; i < jsonData.length; i++) {
+                    const row = jsonData[i];
+                    if (!row || row.every(cell => cell === null || cell === '')) continue;
+
+                    const rowObj = {};
+                    headers.forEach((header, idx) => {
+                        if (header) {
+                            rowObj[String(header).trim()] = row[idx];
+                        }
+                    });
+                    rows.push(rowObj);
+                }
+
+                return { headers, rows, sheetName };
+            },
+
+            // Create Excel file for repair notes
+            createRepairNotesExcel: (notes) => {
+                const headers = ['Barcode#', 'Meeting Note', 'Requires Follow Up', 'Last Updated'];
+                const data = [headers];
+
+                notes.forEach(note => {
+                    data.push([
+                        note.barcode || '',
+                        note.meetingNote || '',
+                        note.requiresFollowUp || '',
+                        note.lastUpdated || new Date().toISOString()
+                    ]);
+                });
+
+                const worksheet = XLSX.utils.aoa_to_sheet(data);
+                const workbook = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'Repair Notes');
+
+                return XLSX.write(workbook, { type: 'array', bookType: 'xlsx' });
+            },
+
+            // Normalize barcode (trimmed, uppercase)
+            normalizeBarcode: (barcode) => {
+                if (!barcode) return '';
+                return String(barcode).trim().toUpperCase();
+            }
+        };
 
         // Constants
         const REGIONS = {
@@ -851,6 +1147,24 @@
             const quoteInputRef = useRef(null);
             const quoteForOptimizerRef = useRef(null);
 
+            // SharePoint integration state
+            const [isAuthenticated, setIsAuthenticated] = useState(false);
+            const [userAccount, setUserAccount] = useState(null);
+            const [spTickets, setSpTickets] = useState(null);
+            const [spReports, setSpReports] = useState(null);
+            const [spCategoryMapping, setSpCategoryMapping] = useState(null);
+            const [spRepairNotes, setSpRepairNotes] = useState(null);
+            const [spSyncStatus, setSpSyncStatus] = useState({
+                tickets: { lastSync: null, error: null },
+                reports: { lastSync: null, error: null },
+                categoryMapping: { lastSync: null, error: null },
+                repairNotes: { lastSync: null, error: null }
+            });
+            const [isSyncing, setIsSyncing] = useState(false);
+            const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+            const syncIntervalRef = useRef(null);
+            const notesSyncIntervalRef = useRef(null);
+
             useEffect(() => {
                 // Load equipment weights from localStorage
                 const savedWeights = localStorage.getItem('equipment_weights');
@@ -864,6 +1178,274 @@
                     localStorage.setItem('ors_api_key', apiKey);
                 }
             }, [apiKey]);
+
+            // Check for existing MSAL authentication on mount
+            useEffect(() => {
+                if (msalInstance) {
+                    const accounts = msalInstance.getAllAccounts();
+                    if (accounts.length > 0) {
+                        setIsAuthenticated(true);
+                        setUserAccount(accounts[0]);
+                    }
+
+                    // Handle redirect callback
+                    msalInstance.handleRedirectPromise().then(response => {
+                        if (response) {
+                            setIsAuthenticated(true);
+                            setUserAccount(response.account);
+                        }
+                    }).catch(error => {
+                        console.error('Redirect error:', error);
+                    });
+                }
+            }, []);
+
+            // Auto-sync setup
+            useEffect(() => {
+                if (isAuthenticated && autoSyncEnabled) {
+                    // Full data sync every 5 minutes
+                    syncIntervalRef.current = setInterval(() => {
+                        syncAllSharePointData();
+                    }, SHAREPOINT_CONFIG.syncIntervals.fullData);
+
+                    // Notes sync every 30 seconds
+                    notesSyncIntervalRef.current = setInterval(() => {
+                        syncRepairNotes();
+                    }, SHAREPOINT_CONFIG.syncIntervals.notes);
+
+                    // Initial sync
+                    syncAllSharePointData();
+                }
+
+                return () => {
+                    if (syncIntervalRef.current) {
+                        clearInterval(syncIntervalRef.current);
+                    }
+                    if (notesSyncIntervalRef.current) {
+                        clearInterval(notesSyncIntervalRef.current);
+                    }
+                };
+            }, [isAuthenticated, autoSyncEnabled]);
+
+            // SharePoint Authentication Functions
+            const handleLogin = async () => {
+                if (!msalInstance) {
+                    showToast('Microsoft authentication not available', 'error');
+                    return;
+                }
+
+                try {
+                    const loginRequest = {
+                        scopes: SHAREPOINT_CONFIG.scopes
+                    };
+                    const response = await msalInstance.loginPopup(loginRequest);
+                    setIsAuthenticated(true);
+                    setUserAccount(response.account);
+                    showToast(`Welcome, ${response.account.name}!`, 'success');
+                } catch (error) {
+                    console.error('Login error:', error);
+                    showToast(`Login failed: ${error.message}`, 'error');
+                }
+            };
+
+            const handleLogout = async () => {
+                if (!msalInstance) return;
+
+                try {
+                    await msalInstance.logoutPopup();
+                    setIsAuthenticated(false);
+                    setUserAccount(null);
+                    setSpTickets(null);
+                    setSpReports(null);
+                    setSpCategoryMapping(null);
+                    setSpRepairNotes(null);
+                    showToast('Logged out successfully', 'success');
+                } catch (error) {
+                    console.error('Logout error:', error);
+                }
+            };
+
+            // SharePoint Sync Functions
+            const syncTickets = async () => {
+                try {
+                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.tickets);
+                    if (data) {
+                        const parsed = SharePointService.parseExcelStrict(data);
+                        setSpTickets(parsed);
+                        setSpSyncStatus(prev => ({
+                            ...prev,
+                            tickets: { lastSync: new Date().toISOString(), error: null }
+                        }));
+                        return parsed;
+                    }
+                } catch (error) {
+                    console.error('Tickets sync error:', error);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        tickets: { ...prev.tickets, error: error.message }
+                    }));
+                }
+                return null;
+            };
+
+            const syncReports = async () => {
+                try {
+                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.reports);
+                    if (data) {
+                        const parsed = SharePointService.parseExcelStrict(data);
+                        setSpReports(parsed);
+                        setSpSyncStatus(prev => ({
+                            ...prev,
+                            reports: { lastSync: new Date().toISOString(), error: null }
+                        }));
+                        return parsed;
+                    }
+                } catch (error) {
+                    console.error('Reports sync error:', error);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        reports: { ...prev.reports, error: error.message }
+                    }));
+                }
+                return null;
+            };
+
+            const syncCategoryMapping = async () => {
+                try {
+                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.categoryMapping);
+                    if (data) {
+                        setSpCategoryMapping(data);
+                        setSpSyncStatus(prev => ({
+                            ...prev,
+                            categoryMapping: { lastSync: new Date().toISOString(), error: null }
+                        }));
+                        return data;
+                    }
+                } catch (error) {
+                    console.error('Category mapping sync error:', error);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        categoryMapping: { ...prev.categoryMapping, error: error.message }
+                    }));
+                }
+                return null;
+            };
+
+            const syncRepairNotes = async () => {
+                try {
+                    const data = await SharePointService.readFile(SHAREPOINT_CONFIG.files.repairNotes);
+                    if (data) {
+                        const parsed = SharePointService.parseExcelFlexible(data, 'Repair Notes');
+                        setSpRepairNotes(parsed);
+                        setSpSyncStatus(prev => ({
+                            ...prev,
+                            repairNotes: { lastSync: new Date().toISOString(), error: null }
+                        }));
+                        return parsed;
+                    }
+                } catch (error) {
+                    console.error('Repair notes sync error:', error);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        repairNotes: { ...prev.repairNotes, error: error.message }
+                    }));
+                }
+                return null;
+            };
+
+            const syncAllSharePointData = async () => {
+                if (!isAuthenticated || isSyncing) return;
+
+                setIsSyncing(true);
+                showToast('Syncing SharePoint data...', 'success');
+
+                try {
+                    await Promise.all([
+                        syncTickets(),
+                        syncReports(),
+                        syncCategoryMapping(),
+                        syncRepairNotes()
+                    ]);
+                    showToast('SharePoint sync complete!', 'success');
+                } catch (error) {
+                    console.error('Sync error:', error);
+                    showToast(`Sync error: ${error.message}`, 'error');
+                } finally {
+                    setIsSyncing(false);
+                }
+            };
+
+            // Save category mapping to SharePoint
+            const saveCategoryMapping = async (newMapping) => {
+                try {
+                    await SharePointService.writeFile(SHAREPOINT_CONFIG.files.categoryMapping, newMapping);
+                    setSpCategoryMapping(newMapping);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        categoryMapping: { lastSync: new Date().toISOString(), error: null }
+                    }));
+                    showToast('Category mapping saved to SharePoint', 'success');
+                } catch (error) {
+                    console.error('Save category mapping error:', error);
+                    showToast(`Failed to save: ${error.message}`, 'error');
+                }
+            };
+
+            // Save repair notes to SharePoint
+            const saveRepairNotes = async (notes) => {
+                try {
+                    const excelData = SharePointService.createRepairNotesExcel(notes);
+                    await SharePointService.writeFile(SHAREPOINT_CONFIG.files.repairNotes, excelData);
+                    setSpSyncStatus(prev => ({
+                        ...prev,
+                        repairNotes: { lastSync: new Date().toISOString(), error: null }
+                    }));
+                    showToast('Repair notes saved to SharePoint', 'success');
+                } catch (error) {
+                    console.error('Save repair notes error:', error);
+                    showToast(`Failed to save notes: ${error.message}`, 'error');
+                }
+            };
+
+            // Update a single repair note
+            const updateRepairNote = async (barcode, updates) => {
+                if (!spRepairNotes) return;
+
+                const normalizedBarcode = SharePointService.normalizeBarcode(barcode);
+                const notes = spRepairNotes.rows.map(row => {
+                    const rowBarcode = SharePointService.normalizeBarcode(
+                        row['Barcode#'] || row['Barcode']
+                    );
+                    if (rowBarcode === normalizedBarcode) {
+                        return {
+                            barcode: normalizedBarcode,
+                            meetingNote: updates.meetingNote !== undefined ? updates.meetingNote : (row['Meeting Note'] || ''),
+                            requiresFollowUp: updates.requiresFollowUp !== undefined ? updates.requiresFollowUp : (row['Requires Follow Up'] || ''),
+                            lastUpdated: new Date().toISOString()
+                        };
+                    }
+                    return {
+                        barcode: rowBarcode,
+                        meetingNote: row['Meeting Note'] || '',
+                        requiresFollowUp: row['Requires Follow Up'] || '',
+                        lastUpdated: row['Last Updated'] || ''
+                    };
+                });
+
+                // Add new note if not found
+                const exists = notes.some(n => n.barcode === normalizedBarcode);
+                if (!exists) {
+                    notes.push({
+                        barcode: normalizedBarcode,
+                        meetingNote: updates.meetingNote || '',
+                        requiresFollowUp: updates.requiresFollowUp || '',
+                        lastUpdated: new Date().toISOString()
+                    });
+                }
+
+                await saveRepairNotes(notes);
+                await syncRepairNotes();
+            };
 
             const showToast = (message, type = 'success') => {
                 setToast({ message, type });
@@ -3014,6 +3596,288 @@
                 </div>
             );
 
+            const renderSharePointTab = () => {
+                const formatLastSync = (isoString) => {
+                    if (!isoString) return 'Never';
+                    const date = new Date(isoString);
+                    return date.toLocaleString();
+                };
+
+                const SyncStatusCard = ({ title, status, icon }) => (
+                    <div className="stat-card" style={{ minWidth: '200px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: '1.5rem' }}>{icon}</span>
+                            {status.error ? (
+                                <span className="api-status disconnected" style={{ fontSize: '0.7rem' }}>Error</span>
+                            ) : status.lastSync ? (
+                                <span className="api-status connected" style={{ fontSize: '0.7rem' }}>Synced</span>
+                            ) : (
+                                <span className="api-status" style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', color: 'var(--text-secondary)' }}>Pending</span>
+                            )}
+                        </div>
+                        <div className="stat-label" style={{ marginTop: '0.5rem' }}>{title}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                            {status.error ? (
+                                <span style={{ color: 'var(--error)' }}>{status.error}</span>
+                            ) : (
+                                formatLastSync(status.lastSync)
+                            )}
+                        </div>
+                    </div>
+                );
+
+                return (
+                    <div>
+                        {/* Authentication Card */}
+                        <div className="card">
+                            <h2 className="card-title">🔐 Microsoft Authentication</h2>
+
+                            {!isAuthenticated ? (
+                                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                                    <p style={{ color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
+                                        Connect to SharePoint to sync repair tracker data
+                                    </p>
+                                    <button className="btn btn-success" onClick={handleLogin} style={{ fontSize: '1.1rem', padding: '1rem 2rem' }}>
+                                        🔑 Sign in with Microsoft
+                                    </button>
+                                    <div style={{ marginTop: '1.5rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                        <p>Site: {SHAREPOINT_CONFIG.hostname}{SHAREPOINT_CONFIG.sitePath}</p>
+                                        <p>Folder: {SHAREPOINT_CONFIG.baseFolder}</p>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+                                        <div>
+                                            <span className="api-status connected">
+                                                <span className="status-dot active"></span>
+                                                Connected
+                                            </span>
+                                            <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)' }}>
+                                                {userAccount?.name} ({userAccount?.username})
+                                            </p>
+                                        </div>
+                                        <button className="btn btn-secondary" onClick={handleLogout}>
+                                            Sign Out
+                                        </button>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <button
+                                            className="btn"
+                                            onClick={syncAllSharePointData}
+                                            disabled={isSyncing}
+                                        >
+                                            {isSyncing ? (
+                                                <><span className="loading"></span> Syncing...</>
+                                            ) : (
+                                                <>🔄 Sync All Data</>
+                                            )}
+                                        </button>
+
+                                        <div className="checkbox-wrapper" style={{ margin: 0 }}>
+                                            <input
+                                                type="checkbox"
+                                                checked={autoSyncEnabled}
+                                                onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                                                id="auto-sync"
+                                            />
+                                            <label htmlFor="auto-sync">
+                                                Auto-sync enabled
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Sync Status Card */}
+                        {isAuthenticated && (
+                            <div className="card">
+                                <h2 className="card-title">📊 Sync Status</h2>
+                                <div className="stats-grid">
+                                    <SyncStatusCard
+                                        title="Ticket List"
+                                        status={spSyncStatus.tickets}
+                                        icon="🎫"
+                                    />
+                                    <SyncStatusCard
+                                        title="Repair Reports"
+                                        status={spSyncStatus.reports}
+                                        icon="📋"
+                                    />
+                                    <SyncStatusCard
+                                        title="Category Mapping"
+                                        status={spSyncStatus.categoryMapping}
+                                        icon="🏷️"
+                                    />
+                                    <SyncStatusCard
+                                        title="Repair Notes"
+                                        status={spSyncStatus.repairNotes}
+                                        icon="📝"
+                                    />
+                                </div>
+
+                                <div style={{ marginTop: '1rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                                    <p>Full sync: Every 5 minutes | Notes sync: Every 30 seconds</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Data Preview Cards */}
+                        {isAuthenticated && spTickets && (
+                            <div className="card">
+                                <h2 className="card-title">🎫 Tickets ({spTickets.rows.length} records)</h2>
+                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                {spTickets.headers.slice(0, 6).map((header, idx) => (
+                                                    <th key={idx}>{header}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {spTickets.rows.slice(0, 10).map((row, idx) => (
+                                                <tr key={idx}>
+                                                    {spTickets.headers.slice(0, 6).map((header, hidx) => (
+                                                        <td key={hidx}>{row[header] || '-'}</td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {spTickets.rows.length > 10 && (
+                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        Showing 10 of {spTickets.rows.length} records
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {isAuthenticated && spReports && (
+                            <div className="card">
+                                <h2 className="card-title">📋 Repair Reports ({spReports.rows.length} records)</h2>
+                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                {spReports.headers.slice(0, 6).map((header, idx) => (
+                                                    <th key={idx}>{header}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {spReports.rows.slice(0, 10).map((row, idx) => (
+                                                <tr key={idx}>
+                                                    {spReports.headers.slice(0, 6).map((header, hidx) => (
+                                                        <td key={hidx}>{row[header] || '-'}</td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {spReports.rows.length > 10 && (
+                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        Showing 10 of {spReports.rows.length} records
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {isAuthenticated && spCategoryMapping && (
+                            <div className="card">
+                                <h2 className="card-title">🏷️ Category Mapping</h2>
+                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Category</th>
+                                                <th>Product Manager</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {Object.entries(spCategoryMapping).slice(0, 10).map(([category, pm], idx) => (
+                                                <tr key={idx}>
+                                                    <td>{category}</td>
+                                                    <td>{pm}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {Object.keys(spCategoryMapping).length > 10 && (
+                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        Showing 10 of {Object.keys(spCategoryMapping).length} mappings
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {isAuthenticated && spRepairNotes && (
+                            <div className="card">
+                                <h2 className="card-title">📝 Repair Notes ({spRepairNotes.rows.length} records)</h2>
+                                <div className="table-container" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                                    <table className="data-table">
+                                        <thead>
+                                            <tr>
+                                                {spRepairNotes.headers.map((header, idx) => (
+                                                    <th key={idx}>{header}</th>
+                                                ))}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {spRepairNotes.rows.slice(0, 10).map((row, idx) => (
+                                                <tr key={idx}>
+                                                    {spRepairNotes.headers.map((header, hidx) => (
+                                                        <td key={hidx}>{row[header] || '-'}</td>
+                                                    ))}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {spRepairNotes.rows.length > 10 && (
+                                    <p style={{ marginTop: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                                        Showing 10 of {spRepairNotes.rows.length} records
+                                    </p>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Configuration Card */}
+                        <div className="card">
+                            <h2 className="card-title">⚙️ SharePoint Configuration</h2>
+                            <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '0.85rem' }}>
+                                <div style={{ marginBottom: '0.75rem' }}>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Site:</span>{' '}
+                                    <span>{SHAREPOINT_CONFIG.hostname}{SHAREPOINT_CONFIG.sitePath}</span>
+                                </div>
+                                <div style={{ marginBottom: '0.75rem' }}>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Base Folder:</span>{' '}
+                                    <span>{SHAREPOINT_CONFIG.baseFolder}</span>
+                                </div>
+                                <div style={{ marginBottom: '0.75rem' }}>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Files:</span>
+                                    <ul style={{ marginTop: '0.5rem', listStyle: 'none', paddingLeft: '1rem' }}>
+                                        <li>📊 {SHAREPOINT_CONFIG.files.tickets} (Read)</li>
+                                        <li>📊 {SHAREPOINT_CONFIG.files.reports} (Read)</li>
+                                        <li>📄 {SHAREPOINT_CONFIG.files.categoryMapping} (Read/Write)</li>
+                                        <li>📊 {SHAREPOINT_CONFIG.files.repairNotes} (Read/Write)</li>
+                                    </ul>
+                                </div>
+                                <div>
+                                    <span style={{ color: 'var(--text-secondary)' }}>Client ID:</span>{' '}
+                                    <span>{SHAREPOINT_CONFIG.clientId}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
             return (
                 <div className="app-container">
                     <header className="header">
@@ -3028,6 +3892,9 @@
                                 <span className="badge">🌍 Regional Analysis</span>
                                 <span className="badge">⚖️ Weight Calculations</span>
                                 <span className="badge">📊 Excel Integration</span>
+                                <span className="badge" style={isAuthenticated ? { background: 'rgba(76, 175, 80, 0.3)', borderColor: 'var(--success)' } : {}}>
+                                    ☁️ SharePoint Sync
+                                </span>
                             </div>
                         </div>
                     </header>
@@ -3057,11 +3924,21 @@
                         >
                             📊 Results
                         </div>
-                        <div 
+                        <div
                             className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
                             onClick={() => setActiveTab('settings')}
                         >
                             🔧 Settings
+                        </div>
+                        <div
+                            className={`tab ${activeTab === 'sharepoint' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('sharepoint')}
+                            style={{
+                                background: isAuthenticated ? 'rgba(76, 175, 80, 0.2)' : undefined,
+                                borderColor: isAuthenticated ? 'var(--success)' : undefined
+                            }}
+                        >
+                            {isAuthenticated ? '☁️' : '🔒'} SharePoint
                         </div>
                     </div>
 
@@ -3070,6 +3947,7 @@
                     {activeTab === 'optimize' && renderOptimizeTab()}
                     {activeTab === 'results' && renderResultsTab()}
                     {activeTab === 'settings' && renderSettingsTab()}
+                    {activeTab === 'sharepoint' && renderSharePointTab()}
 
                     {toast && (
                         <div className={`toast ${toast.type}`}>
