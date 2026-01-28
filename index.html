@@ -694,7 +694,19 @@
         const { useState, useEffect, useRef, useCallback } = React;
 
         // ============================================
-        // SHAREPOINT CONFIGURATION (User-editable)
+        // ⚙️ CONFIGURATION - ENTER YOUR IDs HERE
+        // ============================================
+        const DEFAULT_SHAREPOINT_CONFIG = {
+            clientId: '',  // <-- ENTER YOUR CLIENT ID HERE (e.g., '12345678-1234-...')
+            tenantId: '',  // <-- ENTER YOUR TENANT ID HERE (e.g., '12345678-1234-...')
+            hostname: 'rentexinc.sharepoint.com',
+            sitePath: '/sites/ProductManagers',
+            baseFolder: 'General/Inventory',
+            inventoryFile: 'inventory.xlsx'
+        };
+
+        // ============================================
+        // SHAREPOINT CONFIGURATION HANDLING
         // ============================================
         // Load saved settings from localStorage or use defaults
         const getSharePointConfig = () => {
@@ -706,15 +718,8 @@
                     console.error('Error loading SharePoint config:', e);
                 }
             }
-            // Default configuration - user should update these values
-            return {
-                clientId: '5764301a-9d69-4b4e-8bb6-83dbd4215e24',  // User must provide their Azure AD App Client ID
-                tenantId: 'b958ba39-da13-4553-a009-35b1649f44eb',  // User must provide their Azure AD Tenant ID
-                hostname: 'rentexinc.sharepoint.com',
-                sitePath: '/sites/ProductManagers',
-                baseFolder: 'General/Inventory',
-                inventoryFile: 'inventory.xlsx'
-            };
+            // Use default configuration defined above
+            return { ...DEFAULT_SHAREPOINT_CONFIG };
         };
 
         // Reactive config that can be updated
