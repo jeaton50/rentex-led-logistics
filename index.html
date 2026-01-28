@@ -759,7 +759,7 @@
                 },
                 cache: {
                     cacheLocation: 'localStorage',
-                    storeAuthStateInCookie: false
+                    storeAuthStateInCookie: true
                 }
             };
 
@@ -800,11 +800,16 @@
                     const response = await msalInstance.acquireTokenSilent(request);
                     return response.accessToken;
                 } catch (error) {
-                    if (error instanceof msal.InteractionRequiredAuthError) {
+                    console.warn('Silent token acquisition failed, attempting popup:', error);
+                    try {
+                        // Fallback to popup for ANY error in silent flow to be more robust
+                        // This handles monitor_window_timeout and other browser-specific issues
                         const response = await msalInstance.acquireTokenPopup(request);
                         return response.accessToken;
+                    } catch (popupError) {
+                        console.error('Popup authentication failed:', popupError);
+                        throw popupError;
                     }
-                    throw error;
                 }
             },
 
