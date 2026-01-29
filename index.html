@@ -2065,6 +2065,13 @@
                         } else {
                             unmatched.push(quoteName);
                         }
+
+                        if (matchFound) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+                        } else {
+                            unmatched.push(quoteName);
+                        }
                     });
 
                     console.log(`Matched ${matchCount} items`);
