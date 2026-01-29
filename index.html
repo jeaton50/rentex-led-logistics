@@ -1783,17 +1783,9 @@
                         return;
                     }
 
-                    // The first row should be the header
-                    const headers = rawData[0];
-                    console.log('Headers detected:', headers);
-                    console.log('Header types:', headers.map(h => typeof h));
-
-                    if (!headers || headers.length === 0) {
-                        showToast('❌ Could not read file headers', 'error');
-                        return;
-                    }
-
-                    // Find equipment and quantity columns with flexible matching
+                    // Intelligent Header Detection: Scan first 20 rows
+                    let headerRowIdx = -1;
+                    let headers = [];
                     let equipmentColIdx = -1;
                     let quantityColIdx = -1;
                     let descriptionColIdx = -1;
@@ -1820,16 +1812,27 @@
                             descriptionColIdx = idx;
                             console.log(`✓ Found Description column at index ${idx}`);
                         }
-                        
-                        // Quantity column - check multiple variations
-                        if ((headerStr.includes('order') || 
-                             headerStr.includes('qty') || 
-                             headerStr.includes('quantity') || 
-                             headerStr.includes('need')) && quantityColIdx === -1) {
-                            quantityColIdx = idx;
-                            console.log(`✓ Found Quantity column at index ${idx}`);
+                    }
+
+                    // Fallback if intelligent scan failed: use Row 0
+                    if (headerRowIdx === -1) {
+                        console.log('⚠️ Intelligent header scan failed, falling back to row 0');
+                        headerRowIdx = 0;
+                        headers = rawData[0];
+                        if (!headers || headers.length === 0) {
+                            showToast('❌ Could not read file headers', 'error');
+                            return;
                         }
-                    });
+
+                        // Try standard detection on row 0 again (just in case)
+                        headers.forEach((header, idx) => {
+                            if (!header) return;
+                            const headerStr = String(header).toLowerCase().trim();
+                            if ((headerStr.includes('equipment') || headerStr.includes('item') || headerStr.includes('product')) && equipmentColIdx === -1) equipmentColIdx = idx;
+                            if ((headerStr.includes('order') || headerStr.includes('qty') || headerStr.includes('quantity')) && quantityColIdx === -1) quantityColIdx = idx;
+                            if ((headerStr.includes('description') || headerStr.includes('desc')) && descriptionColIdx === -1) descriptionColIdx = idx;
+                        });
+                    }
 
                     console.log('Equipment column index:', equipmentColIdx);
                     console.log('Quantity column index:', quantityColIdx);
@@ -1879,12 +1882,15 @@
                         console.log(`SUCCESS: Using Description col ${descriptionColIdx}`);
                     }
 
-                    // Extract equipment, descriptions, and quantities (skip header row)
+                    // Extract equipment, descriptions, and quantities (start after header row)
                     const quoteEquipment = {};
                     const quoteDescriptions = {};
                     let processedRows = 0;
 
-                    for (let i = 1; i < rawData.length; i++) {
+                    const startRow = headerRowIdx + 1;
+                    console.log(`Reading data starting from row ${startRow}`);
+
+                    for (let i = startRow; i < rawData.length; i++) {
                         const row = rawData[i];
                         if (!row || row.length === 0 || row.every(cell => !cell)) continue;
 
@@ -1947,6 +1953,12 @@
                     // ============================================
 
                     // Tokenizer: splits "Shure SM-58 (Mic)" -> ["shure", "sm", "58", "mic"]
+                    // AND splits "10ft" -> ["10", "ft"]
+                    const getTokens = (str) => {
+                        if (!str) return [];
+                        const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ');
+                        return clean.match(/[a-z]+|[0-9]+/g) || [];
+                    };
                     const getTokens = (str) => String(str).toLowerCase().match(/[a-z0-9]+/g) || [];
 
                     // Normalize: "Shure SM-58" -> "shuresm58"
@@ -2149,6 +2161,8 @@
                                     method = `desc_${result.method}`;
                                 }
                             }
+                        } else {
+                            unmatched.push(quoteName);
                         }
 
                         if (matchedName) {
