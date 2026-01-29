@@ -2151,6 +2151,28 @@
                             }
                         }
 
+                        if (matchedName) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+
+                            // Update stats
+                            if (method === 'exact') matchStats.exact++;
+                            else if (method === 'case') matchStats.case++;
+                            else if (method === 'normalized') matchStats.norm++;
+                            else if (method === 'sorted_token') matchStats.sorted++;
+                            else if (method.startsWith('substring')) matchStats.substring++;
+                            else if (method.startsWith('fuzzy')) matchStats.fuzzy++;
+                            else if (method.startsWith('desc')) matchStats.desc_fallback++;
+                            else if (method.startsWith('inv_desc') || method.startsWith('quote_contains')) matchStats.inv_desc++;
+
+                            // Log weird matches for debugging
+                            if (!method.startsWith('exact') && !method.startsWith('case')) {
+                                console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
+                            }
+                        } else {
+                            unmatched.push(quoteName);
+                        }
+
                         // Strategy 4: Match Quote Description against Inventory Description
                         // (Useful if both sides use Item Codes but Descriptions match)
                         if (!matchedName && quoteDescriptions[quoteName]) {
