@@ -2744,43 +2744,6 @@
                         )}
 
                         <div className="form-group">
-                            <label className="form-label">Destination Warehouse</label>
-                            <select 
-                                className="form-select"
-                                value={destination}
-                                onChange={(e) => setDestination(e.target.value)}
-                            >
-                                <option value="">Select destination...</option>
-                                {Object.keys(WAREHOUSE_COORDS).map(wh => (
-                                    <option key={wh} value={wh}>{wh}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">Equipment Name</label>
-                            <input 
-                                type="text"
-                                className="form-input"
-                                placeholder="Enter equipment name..."
-                                value={equipment}
-                                onChange={(e) => setEquipment(e.target.value)}
-                            />
-                        </div>
-
-                        <div className="form-group">
-                            <label className="form-label">Quantity Needed</label>
-                            <input 
-                                type="number"
-                                className="form-input"
-                                placeholder="Enter quantity..."
-                                value={quantity}
-                                onChange={(e) => setQuantity(e.target.value)}
-                                min="1"
-                            />
-                        </div>
-
-                        <div className="form-group">
                             <label className="form-label">Regional Filter (Optional)</label>
                             <select 
                                 className="form-select"
