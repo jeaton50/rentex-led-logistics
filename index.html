@@ -780,6 +780,10 @@
         // SHAREPOINT SERVICE
         // ============================================
         const SharePointService = {
+            // Cache for site and drive IDs
+            _siteId: null,
+            _driveId: null,
+
             // Get access token
             getAccessToken: async () => {
                 if (!msalInstance) {
@@ -813,28 +817,95 @@
                 }
             },
 
-            // Get Graph API base URL for the SharePoint site
-            getGraphBaseUrl: () => {
-                return `https://graph.microsoft.com/v1.0/sites/${SHAREPOINT_CONFIG.hostname}:${SHAREPOINT_CONFIG.sitePath}:`;
+            // Get the SharePoint site ID
+            getSiteId: async () => {
+                if (SharePointService._siteId) {
+                    return SharePointService._siteId;
+                }
+
+                const accessToken = await SharePointService.getAccessToken();
+                const siteUrl = `https://graph.microsoft.com/v1.0/sites/${SHAREPOINT_CONFIG.hostname}:${SHAREPOINT_CONFIG.sitePath}`;
+
+                console.log('Getting site ID from:', siteUrl);
+
+                const response = await fetch(siteUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Site lookup error:', errorText);
+                    throw new Error(`Failed to get site: ${response.status}. Check that the site path "${SHAREPOINT_CONFIG.sitePath}" is correct.`);
+                }
+
+                const data = await response.json();
+                SharePointService._siteId = data.id;
+                console.log('Site ID:', data.id);
+                return data.id;
+            },
+
+            // Get the default document library drive ID
+            getDriveId: async () => {
+                if (SharePointService._driveId) {
+                    return SharePointService._driveId;
+                }
+
+                const accessToken = await SharePointService.getAccessToken();
+                const siteId = await SharePointService.getSiteId();
+                const driveUrl = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive`;
+
+                console.log('Getting drive ID from:', driveUrl);
+
+                const response = await fetch(driveUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Drive lookup error:', errorText);
+                    throw new Error(`Failed to get drive: ${response.status}`);
+                }
+
+                const data = await response.json();
+                SharePointService._driveId = data.id;
+                console.log('Drive ID:', data.id);
+                return data.id;
+            },
+
+            // Clear cached IDs (call when config changes)
+            clearCache: () => {
+                SharePointService._siteId = null;
+                SharePointService._driveId = null;
             },
 
             // List files in a folder
             listFiles: async (folderPath) => {
                 const accessToken = await SharePointService.getAccessToken();
-                const baseUrl = SharePointService.getGraphBaseUrl();
+                const driveId = await SharePointService.getDriveId();
                 const path = folderPath || SHAREPOINT_CONFIG.baseFolder;
 
-                const response = await fetch(
-                    `${baseUrl}/drive/root:/${path}:/children`,
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`,
-                            'Content-Type': 'application/json'
-                        }
+                // URL encode the path properly
+                const encodedPath = path.split('/').map(p => encodeURIComponent(p)).join('/');
+                const listUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodedPath}:/children`;
+
+                console.log('Listing files from:', listUrl);
+
+                const response = await fetch(listUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
                     }
-                );
+                });
 
                 if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('List files error:', errorText);
+                    if (response.status === 404) {
+                        throw new Error(`Folder not found: "${path}". Please check the folder path in settings.`);
+                    }
                     throw new Error(`Failed to list files: ${response.status}`);
                 }
 
@@ -852,22 +923,23 @@
             // Read Excel file from SharePoint and return raw array data
             readInventoryFile: async (fileName) => {
                 const accessToken = await SharePointService.getAccessToken();
-                const baseUrl = SharePointService.getGraphBaseUrl();
+                const driveId = await SharePointService.getDriveId();
                 const filePath = fileName ?
                     `${SHAREPOINT_CONFIG.baseFolder}/${fileName}` :
                     `${SHAREPOINT_CONFIG.baseFolder}/${SHAREPOINT_CONFIG.inventoryFile}`;
 
-                console.log('=== SHAREPOINT FILE READ START ===');
-                console.log('Reading file:', filePath);
+                // URL encode the path properly
+                const encodedPath = filePath.split('/').map(p => encodeURIComponent(p)).join('/');
+                const fileUrl = `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${encodedPath}:/content`;
 
-                const response = await fetch(
-                    `${baseUrl}/drive/root:/${filePath}:/content`,
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}`
-                        }
+                console.log('=== SHAREPOINT FILE READ START ===');
+                console.log('Reading file:', fileUrl);
+
+                const response = await fetch(fileUrl, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
                     }
-                );
+                });
 
                 if (!response.ok) {
                     if (response.status === 404) {
@@ -1098,6 +1170,9 @@
                     ...SHAREPOINT_CONFIG,
                     ...config
                 };
+
+                // Clear cached site/drive IDs since config changed
+                SharePointService.clearCache();
 
                 // Reinitialize MSAL with new credentials
                 msalInstance = initializeMsal(config.clientId, config.tenantId);
