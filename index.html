@@ -1790,57 +1790,27 @@
                     let quantityColIdx = -1;
                     let descriptionColIdx = -1;
 
-                    console.log('Scanning for header row...');
-
-                    for (let i = 0; i < Math.min(20, rawData.length); i++) {
-                        const row = rawData[i];
-                        if (!row || row.length === 0) continue;
-
-                        let tempEqIdx = -1;
-                        let tempQtyIdx = -1;
-                        let tempDescIdx = -1;
-
-                        row.forEach((cell, idx) => {
-                            if (!cell) return;
-                            const str = String(cell).toLowerCase().trim();
-
-                            // Check for Equipment keywords
-                            if ((str.includes('equipment') ||
-                                 str.includes('item') ||
-                                 str.includes('product') ||
-                                 str.includes('model')) && tempEqIdx === -1) {
-                                tempEqIdx = idx;
-                            }
-
-                            // Check for Quantity keywords
-                            if ((str.includes('order') ||
-                                 str.includes('qty') ||
-                                 str.includes('quantity') ||
-                                 str.includes('need')) && tempQtyIdx === -1) {
-                                tempQtyIdx = idx;
-                            }
-
-                            // Check for Description keywords
-                            if ((str.includes('description') ||
-                                 str.includes('desc') ||
-                                 str.includes('details') ||
-                                 str.includes('spec') ||
-                                 str.includes('notes') ||
-                                 str.includes('cat') ||
-                                 str.includes('category')) && tempDescIdx === -1) {
-                                tempDescIdx = idx;
-                            }
-                        });
-
-                        // If we found at least Equipment AND Quantity in this row, treat it as header
-                        if (tempEqIdx !== -1 && tempQtyIdx !== -1) {
-                            headerRowIdx = i;
-                            headers = row;
-                            equipmentColIdx = tempEqIdx;
-                            quantityColIdx = tempQtyIdx;
-                            descriptionColIdx = tempDescIdx;
-                            console.log(`✓ Found header at row ${i}:`, row);
-                            break;
+                    headers.forEach((header, idx) => {
+                        if (!header) return;
+                        
+                        const headerStr = String(header).toLowerCase().trim();
+                        console.log(`Column ${idx}: "${header}" -> "${headerStr}"`);
+                        
+                        // Equipment column - check if it contains "equipment", "item", "product" anywhere
+                        if ((headerStr.includes('equipment') ||
+                             headerStr.includes('item') ||
+                             headerStr.includes('product') ||
+                             headerStr.includes('model')) && equipmentColIdx === -1) {
+                            equipmentColIdx = idx;
+                            console.log(`✓ Found Equipment column at index ${idx}`);
+                        }
+                        
+                        // Description column
+                        if ((headerStr.includes('description') ||
+                             headerStr.includes('desc') ||
+                             headerStr.includes('details')) && descriptionColIdx === -1) {
+                            descriptionColIdx = idx;
+                            console.log(`✓ Found Description column at index ${idx}`);
                         }
                     }
 
@@ -1989,6 +1959,7 @@
                         const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ');
                         return clean.match(/[a-z]+|[0-9]+/g) || [];
                     };
+                    const getTokens = (str) => String(str).toLowerCase().match(/[a-z0-9]+/g) || [];
 
                     // Normalize: "Shure SM-58" -> "shuresm58"
                     const normalize = (str) => String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -2010,8 +1981,7 @@
                         normalized: {},
                         sorted: {},
                         tokens: [], // Array of { name, tokens: Set }
-                        descriptions: [], // Array of { name, desc, tokens: Set }
-                        rich: [] // Array of { name, tokens: Set (Name + Desc) }
+                        descriptions: [] // Array of { name, desc, tokens: Set }
                     };
 
                     availableEquipment.forEach(item => {
@@ -2024,24 +1994,14 @@
                         });
 
                         // Inventory Description Index (if available)
-                        let descTokens = new Set();
                         if (parsedData.inventoryDescriptions && parsedData.inventoryDescriptions[item]) {
                             const desc = parsedData.inventoryDescriptions[item];
-                            descTokens = new Set(getTokens(desc));
                             inventoryIndex.descriptions.push({
                                 name: item,
                                 desc: desc,
-                                tokens: descTokens
+                                tokens: new Set(getTokens(desc))
                             });
                         }
-
-                        // Rich Index (Name + Description combined)
-                        const nameTokens = new Set(getTokens(item));
-                        const richTokens = new Set([...nameTokens, ...descTokens]);
-                        inventoryIndex.rich.push({
-                            name: item,
-                            tokens: richTokens
-                        });
                     });
 
                     // Core Matching Function
@@ -2081,8 +2041,8 @@
                         let bestFuzzy = null;
                         let bestScore = 0;
 
-                        // Threshold: 0.35 means ~35% overlap (lower for split tokens)
-                        const THRESHOLD = 0.35;
+                        // Threshold: 0.4 means ~40% overlap (e.g. 2 words out of 5 match)
+                        const THRESHOLD = 0.4;
 
                         for (const item of inventoryIndex.tokens) {
                             const score = getJaccardScore(queryTokens, item.tokens);
@@ -2139,32 +2099,7 @@
                     // EXECUTE MATCHING
                     // ============================================
 
-                    // Function to perform Rich Match (Quote Name + Desc vs Inventory Name + Desc)
-                    const findRichMatch = (qName, qDesc) => {
-                        const combined = `${qName} ${qDesc || ''}`;
-                        const qTokens = new Set(getTokens(combined));
-                        if (qTokens.size === 0) return null;
-
-                        let bestFuzzy = null;
-                        let bestScore = 0;
-                        const THRESHOLD = 0.4; // Require decent overlap for rich match
-
-                        for (const item of inventoryIndex.rich) {
-                            const score = getJaccardScore(qTokens, item.tokens);
-                            if (score > bestScore) {
-                                bestScore = score;
-                                bestFuzzy = item.name;
-                            }
-                        }
-
-                        if (bestScore >= THRESHOLD) {
-                            return { name: bestFuzzy, method: `rich_fuzzy_${bestScore.toFixed(2)}` };
-                        }
-
-                        return null;
-                    };
-
-                    const matchStats = { exact: 0, case: 0, norm: 0, sorted: 0, substring: 0, fuzzy: 0, desc_fallback: 0, inv_desc: 0, rich: 0 };
+                    const matchStats = { exact: 0, case: 0, norm: 0, sorted: 0, substring: 0, fuzzy: 0, desc_fallback: 0, inv_desc: 0 };
 
                     Object.entries(quoteEquipment).forEach(([quoteName, qty]) => {
                         let matchedName = null;
@@ -2226,6 +2161,30 @@
                                     method = `desc_${result.method}`;
                                 }
                             }
+                        } else {
+                            unmatched.push(quoteName);
+                        }
+
+                        if (matchedName) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+
+                            // Update stats
+                            if (method === 'exact') matchStats.exact++;
+                            else if (method === 'case') matchStats.case++;
+                            else if (method === 'normalized') matchStats.norm++;
+                            else if (method === 'sorted_token') matchStats.sorted++;
+                            else if (method.startsWith('substring')) matchStats.substring++;
+                            else if (method.startsWith('fuzzy')) matchStats.fuzzy++;
+                            else if (method.startsWith('desc')) matchStats.desc_fallback++;
+                            else if (method.startsWith('inv_desc') || method.startsWith('quote_contains')) matchStats.inv_desc++;
+
+                            // Log weird matches for debugging
+                            if (!method.startsWith('exact') && !method.startsWith('case')) {
+                                console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
+                            }
+                        } else {
+                            unmatched.push(quoteName);
                         }
 
                         // Strategy 4: Match Quote Description against Inventory Description
@@ -2236,16 +2195,6 @@
                             if (result) {
                                 matchedName = result.name;
                                 method = `desc_to_desc_${result.method}`;
-                            }
-                        }
-
-                        // Strategy 5: Rich Match (Combined Context)
-                        if (!matchedName) {
-                            const desc = quoteDescriptions[quoteName];
-                            const result = findRichMatch(quoteName, desc);
-                            if (result) {
-                                matchedName = result.name;
-                                method = result.method;
                             }
                         }
 
@@ -2263,7 +2212,6 @@
                             else if (method.startsWith('desc')) matchStats.desc_fallback++;
                             else if (method.startsWith('inv_desc') || method.startsWith('quote_contains')) matchStats.inv_desc++;
                             else if (method.startsWith('desc_to_desc')) matchStats.inv_desc++;
-                            else if (method.startsWith('rich')) matchStats.rich++;
 
                             // Log weird matches for debugging
                             if (!method.startsWith('exact') && !method.startsWith('case')) {
