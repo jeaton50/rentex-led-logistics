@@ -1695,7 +1695,10 @@
                     
                     for (let i = 1; i < excelData.length; i++) {
                         const row = excelData[i];
-                        const equipmentName = row[equipmentColIndex];
+                        const rawEquipmentName = row[equipmentColIndex];
+                        if (!rawEquipmentName) continue;
+
+                        const equipmentName = String(rawEquipmentName).trim();
                         if (!equipmentName) continue;
 
                         inventory[equipmentName] = {};
@@ -1902,26 +1905,75 @@
                     const unmatched = [];
                     let matchCount = 0;
 
+                    // Helper for normalization (remove non-alphanumeric, lowercase)
+                    const normalize = (str) => String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                    // Helper for sorted token normalization (catches "Speaker (Powered)" vs "Powered Speaker")
+                    const normalizeSorted = (str) => {
+                        const tokens = String(str).toLowerCase().match(/[a-z0-9]+/g) || [];
+                        return tokens.sort().join('');
+                    };
+
+                    // Pre-compute normalized inventory keys for faster lookup
+                    const normalizedInventory = {};
+                    const sortedInventory = {};
+                    availableEquipment.forEach(item => {
+                        normalizedInventory[normalize(item)] = item;
+                        sortedInventory[normalizeSorted(item)] = item;
+                    });
+
+                    const matchStats = { exact: 0, case: 0, norm: 0, sorted: 0 };
+
                     Object.entries(quoteEquipment).forEach(([quoteName, qty]) => {
-                        // Try exact match first
+                        let matchFound = false;
+                        let matchedName = null;
+
+                        // 1. Exact match
                         if (availableEquipment.includes(quoteName)) {
-                            matched[quoteName] = qty;
-                            matchCount++;
-                        } else {
-                            // Try case-insensitive match
-                            const match = availableEquipment.find(inv => 
+                            matchFound = true;
+                            matchedName = quoteName;
+                            matchStats.exact++;
+                        }
+                        // 2. Case-insensitive match
+                        else {
+                            const caseMatch = availableEquipment.find(inv =>
                                 inv.toLowerCase() === quoteName.toLowerCase()
                             );
-                            if (match) {
-                                matched[match] = qty;
-                                matchCount++;
-                            } else {
-                                unmatched.push(quoteName);
+                            if (caseMatch) {
+                                matchFound = true;
+                                matchedName = caseMatch;
+                                matchStats.case++;
                             }
+                            // 3. Normalized match (ignore punctuation/spaces)
+                            else {
+                                const normQuote = normalize(quoteName);
+                                if (normalizedInventory[normQuote]) {
+                                    matchFound = true;
+                                    matchedName = normalizedInventory[normQuote];
+                                    matchStats.norm++;
+                                }
+                                // 4. Sorted Token Match (ignore word order)
+                                else {
+                                    const sortedQuote = normalizeSorted(quoteName);
+                                    if (sortedInventory[sortedQuote]) {
+                                        matchFound = true;
+                                        matchedName = sortedInventory[sortedQuote];
+                                        matchStats.sorted++;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (matchFound) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+                        } else {
+                            unmatched.push(quoteName);
                         }
                     });
 
                     console.log(`Matched ${matchCount} items`);
+                    console.log('Match stats:', matchStats);
                     if (unmatched.length > 0) {
                         console.log('Unmatched items:', unmatched.slice(0, 10));
                     }
