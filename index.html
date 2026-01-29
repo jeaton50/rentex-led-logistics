@@ -1804,14 +1804,19 @@
                         const headerStr = String(header).toLowerCase().trim();
                         console.log(`Column ${idx}: "${header}" -> "${headerStr}"`);
                         
-                        // Equipment column - check if it contains "equipment" anywhere
-                        if (headerStr.includes('equipment') && equipmentColIdx === -1) {
+                        // Equipment column - check if it contains "equipment", "item", "product" anywhere
+                        if ((headerStr.includes('equipment') ||
+                             headerStr.includes('item') ||
+                             headerStr.includes('product') ||
+                             headerStr.includes('model')) && equipmentColIdx === -1) {
                             equipmentColIdx = idx;
                             console.log(`✓ Found Equipment column at index ${idx}`);
                         }
                         
                         // Description column
-                        if (headerStr.includes('description') && descriptionColIdx === -1) {
+                        if ((headerStr.includes('description') ||
+                             headerStr.includes('desc') ||
+                             headerStr.includes('details')) && descriptionColIdx === -1) {
                             descriptionColIdx = idx;
                             console.log(`✓ Found Description column at index ${idx}`);
                         }
@@ -2156,33 +2161,6 @@
                             if (!method.startsWith('exact') && !method.startsWith('case')) {
                                 console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
                             }
-                        } else {
-                            unmatched.push(quoteName);
-                        }
-
-                        if (matchedName) {
-                            matched[matchedName] = qty;
-                            matchCount++;
-
-                            // Update stats
-                            if (method === 'exact') matchStats.exact++;
-                            else if (method === 'case') matchStats.case++;
-                            else if (method === 'normalized') matchStats.norm++;
-                            else if (method === 'sorted_token') matchStats.sorted++;
-                            else if (method.startsWith('fuzzy')) matchStats.fuzzy++;
-                            else if (method.startsWith('desc')) matchStats.desc_fallback++;
-
-                            // Log weird matches for debugging
-                            if (!method.startsWith('exact') && !method.startsWith('case')) {
-                                console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
-                            }
-                        } else {
-                            unmatched.push(quoteName);
-                        }
-
-                        if (matchFound) {
-                            matched[matchedName] = qty;
-                            matchCount++;
                         } else {
                             unmatched.push(quoteName);
                         }
