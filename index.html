@@ -1888,33 +1888,76 @@
 
                     const availableEquipment = Object.keys(parsedData.inventory);
                     console.log(`Inventory has ${availableEquipment.length} items`);
-                    
+                    console.log('Sample inventory items:', availableEquipment.slice(0, 10));
+                    console.log('Sample quote items:', Object.keys(quoteEquipment).slice(0, 10));
+
                     const matched = {};
                     const unmatched = [];
                     let matchCount = 0;
+
+                    // Helper function to normalize equipment names for comparison
+                    const normalize = (str) => {
+                        return String(str)
+                            .toLowerCase()
+                            .trim()
+                            .replace(/[\s\-_]+/g, '')  // Remove spaces, hyphens, underscores
+                            .replace(/[^a-z0-9]/g, ''); // Keep only alphanumeric
+                    };
+
+                    // Build normalized inventory lookup
+                    const normalizedInventory = {};
+                    availableEquipment.forEach(name => {
+                        const norm = normalize(name);
+                        if (!normalizedInventory[norm]) {
+                            normalizedInventory[norm] = name;
+                        }
+                    });
 
                     Object.entries(quoteEquipment).forEach(([quoteName, qty]) => {
                         // Try exact match first
                         if (availableEquipment.includes(quoteName)) {
                             matched[quoteName] = qty;
                             matchCount++;
+                            console.log(`✓ Exact match: "${quoteName}"`);
                         } else {
                             // Try case-insensitive match
-                            const match = availableEquipment.find(inv => 
+                            const caseMatch = availableEquipment.find(inv =>
                                 inv.toLowerCase() === quoteName.toLowerCase()
                             );
-                            if (match) {
-                                matched[match] = qty;
+                            if (caseMatch) {
+                                matched[caseMatch] = qty;
                                 matchCount++;
+                                console.log(`✓ Case match: "${quoteName}" -> "${caseMatch}"`);
                             } else {
-                                unmatched.push(quoteName);
+                                // Try normalized match (ignoring spaces, hyphens, case)
+                                const normQuote = normalize(quoteName);
+                                if (normalizedInventory[normQuote]) {
+                                    const invName = normalizedInventory[normQuote];
+                                    matched[invName] = qty;
+                                    matchCount++;
+                                    console.log(`✓ Normalized match: "${quoteName}" -> "${invName}"`);
+                                } else {
+                                    // Try partial match - quote name contains inventory name or vice versa
+                                    const partialMatch = availableEquipment.find(inv => {
+                                        const invNorm = normalize(inv);
+                                        return invNorm.includes(normQuote) || normQuote.includes(invNorm);
+                                    });
+                                    if (partialMatch) {
+                                        matched[partialMatch] = qty;
+                                        matchCount++;
+                                        console.log(`✓ Partial match: "${quoteName}" -> "${partialMatch}"`);
+                                    } else {
+                                        unmatched.push(quoteName);
+                                        console.log(`✗ No match: "${quoteName}" (normalized: "${normQuote}")`);
+                                    }
+                                }
                             }
                         }
                     });
 
-                    console.log(`Matched ${matchCount} items`);
+                    console.log(`Matched ${matchCount} of ${Object.keys(quoteEquipment).length} items`);
                     if (unmatched.length > 0) {
-                        console.log('Unmatched items:', unmatched.slice(0, 10));
+                        console.log('Unmatched items:', unmatched);
                     }
                     console.log('=== QUOTE LOADER DEBUG END ===');
 
