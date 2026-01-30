@@ -695,7 +695,19 @@
         const { useState, useEffect, useRef, useCallback } = React;
 
         // ============================================
-        // SHAREPOINT CONFIGURATION (User-editable)
+        // ⚙️ CONFIGURATION - ENTER YOUR IDs HERE
+        // ============================================
+        const DEFAULT_SHAREPOINT_CONFIG = {
+            clientId: '',  // <-- ENTER YOUR CLIENT ID HERE (e.g., '12345678-1234-...')
+            tenantId: '',  // <-- ENTER YOUR TENANT ID HERE (e.g., '12345678-1234-...')
+            hostname: 'rentexinc.sharepoint.com',
+            sitePath: '/sites/ProductManagers',
+            baseFolder: 'General/Inventory',
+            inventoryFile: 'inventory.xlsx'
+        };
+
+        // ============================================
+        // SHAREPOINT CONFIGURATION HANDLING
         // ============================================
         // Load saved settings from localStorage or use defaults
         const getSharePointConfig = () => {
@@ -707,15 +719,8 @@
                     console.error('Error loading SharePoint config:', e);
                 }
             }
-            // Default configuration - user should update these values
-            return {
-                clientId: '',  // User must provide their Azure AD App Client ID
-                tenantId: '',  // User must provide their Azure AD Tenant ID
-                hostname: 'rentexinc.sharepoint.com',
-                sitePath: '/sites/ProductManagers',
-                baseFolder: 'General/Inventory',
-                inventoryFile: 'inventory.xlsx'
-            };
+            // Use default configuration defined above
+            return { ...DEFAULT_SHAREPOINT_CONFIG };
         };
 
         // Reactive config that can be updated
@@ -765,7 +770,7 @@
                 },
                 cache: {
                     cacheLocation: 'localStorage',
-                    storeAuthStateInCookie: false
+                    storeAuthStateInCookie: true
                 }
             };
 
@@ -810,14 +815,16 @@
                     const response = await msalInstance.acquireTokenSilent(request);
                     return response.accessToken;
                 } catch (error) {
-                    // Check if interaction is required (handle case where msal might not be defined)
-                    const isInteractionRequired = isMsalAvailable() &&
-                        error instanceof msal.InteractionRequiredAuthError;
-                    if (isInteractionRequired) {
+                    console.warn('Silent token acquisition failed, attempting popup:', error);
+                    try {
+                        // Fallback to popup for ANY error in silent flow to be more robust
+                        // This handles monitor_window_timeout and other browser-specific issues
                         const response = await msalInstance.acquireTokenPopup(request);
                         return response.accessToken;
+                    } catch (popupError) {
+                        console.error('Popup authentication failed:', popupError);
+                        throw popupError;
                     }
-                    throw error;
                 }
             },
 
@@ -1121,7 +1128,6 @@
             const [equipmentFromQuote, setEquipmentFromQuote] = useState({});
             const [equipmentDescriptions, setEquipmentDescriptions] = useState({});
             const [selectedEquipmentItems, setSelectedEquipmentItems] = useState({});
-            const [batchOptimizationMode, setBatchOptimizationMode] = useState(false);
             const [isBulkOptimizing, setIsBulkOptimizing] = useState(false);
             const [bulkResults, setBulkResults] = useState(null);
             const [preferredWarehouse, setPreferredWarehouse] = useState('');
@@ -1520,10 +1526,13 @@
                     
                     // Find column indices
                     const equipmentColIdx = headers.findIndex(h => 
-                        h && String(h).toLowerCase().trim() === 'equipment'
+                        h && String(h).toLowerCase().includes('equipment')
+                    );
+                    const descriptionColIdx = headers.findIndex(h =>
+                        h && (String(h).toLowerCase().includes('description') || String(h).toLowerCase().includes('desc'))
                     );
                     const locationColIdx = headers.findIndex(h => 
-                        h && String(h).toLowerCase().trim() === 'location'
+                        h && String(h).toLowerCase().includes('location')
                     );
                     
                     // Find "Qty" columns with their corresponding dates
@@ -1595,6 +1604,7 @@
                     
                     // Group data by equipment and location
                     const inventory = {};
+                    const inventoryDescriptions = {};
                     const warehouseColumns = {};
                     let processedRows = 0;
                     
@@ -1605,6 +1615,7 @@
                         
                         const equipment = row[equipmentColIdx];
                         const location = row[locationColIdx];
+                        const description = descriptionColIdx !== -1 ? row[descriptionColIdx] : '';
                         
                         if (!equipment || !location) continue;
                         
@@ -1623,6 +1634,9 @@
                         // Initialize equipment entry if needed
                         if (!inventory[equipmentStr]) {
                             inventory[equipmentStr] = {};
+                            if (description) {
+                                inventoryDescriptions[equipmentStr] = String(description).trim();
+                            }
                         }
                         
                         // Add/update quantity for this location
@@ -1644,7 +1658,8 @@
                     console.log('=== PARSE INVENTORY DEBUG END ===');
                     
                     return { 
-                        inventory, 
+                        inventory,
+                        inventoryDescriptions,
                         warehouseColumns: Object.keys(warehouseColumns).reduce((acc, wh) => {
                             acc[wh] = wh; // Just store warehouse name
                             return acc;
@@ -1680,7 +1695,15 @@
 
                     // Find equipment column
                     const equipmentColIndex = headers.findIndex(h => 
-                        h && h.toString().toLowerCase().includes('equipment')
+                        h && (h.toString().toLowerCase().includes('equipment') ||
+                              h.toString().toLowerCase().includes('item') ||
+                              h.toString().toLowerCase().includes('product'))
+                    );
+
+                    // Find description column
+                    const descriptionColIndex = headers.findIndex(h =>
+                        h && (h.toString().toLowerCase().includes('description') ||
+                              h.toString().toLowerCase().includes('desc'))
                     );
 
                     console.log('Equipment column index:', equipmentColIndex);
@@ -1696,14 +1719,24 @@
 
                     // Parse inventory data
                     const inventory = {};
+                    const inventoryDescriptions = {};
                     let equipmentCount = 0;
                     
                     for (let i = 1; i < excelData.length; i++) {
                         const row = excelData[i];
-                        const equipmentName = row[equipmentColIndex];
+                        const rawEquipmentName = row[equipmentColIndex];
+                        if (!rawEquipmentName) continue;
+
+                        const equipmentName = String(rawEquipmentName).trim();
+                        const description = descriptionColIndex !== -1 ? row[descriptionColIndex] : '';
+
                         if (!equipmentName) continue;
 
                         inventory[equipmentName] = {};
+                        if (description) {
+                            inventoryDescriptions[equipmentName] = String(description).trim();
+                        }
+
                         Object.entries(warehouseColumns).forEach(([warehouse, colIndex]) => {
                             const qty = parseInt(row[colIndex]) || 0;
                             inventory[equipmentName][warehouse] = qty;
@@ -1715,7 +1748,7 @@
                     console.log('Sample equipment:', Object.keys(inventory).slice(0, 5));
                     console.log('=== PARSE INVENTORY DEBUG END ===');
 
-                    return { inventory, warehouseColumns };
+                    return { inventory, inventoryDescriptions, warehouseColumns };
                 }
             };
 
@@ -1761,17 +1794,9 @@
                         return;
                     }
 
-                    // The first row should be the header
-                    const headers = rawData[0];
-                    console.log('Headers detected:', headers);
-                    console.log('Header types:', headers.map(h => typeof h));
-
-                    if (!headers || headers.length === 0) {
-                        showToast('❌ Could not read file headers', 'error');
-                        return;
-                    }
-
-                    // Find equipment and quantity columns with flexible matching
+                    // Intelligent Header Detection: Scan first 20 rows
+                    let headerRowIdx = -1;
+                    let headers = [];
                     let equipmentColIdx = -1;
                     let quantityColIdx = -1;
                     let descriptionColIdx = -1;
@@ -1782,27 +1807,43 @@
                         const headerStr = String(header).toLowerCase().trim();
                         console.log(`Column ${idx}: "${header}" -> "${headerStr}"`);
                         
-                        // Equipment column - check if it contains "equipment" anywhere
-                        if (headerStr.includes('equipment') && equipmentColIdx === -1) {
+                        // Equipment column - check if it contains "equipment", "item", "product" anywhere
+                        if ((headerStr.includes('equipment') ||
+                             headerStr.includes('item') ||
+                             headerStr.includes('product') ||
+                             headerStr.includes('model')) && equipmentColIdx === -1) {
                             equipmentColIdx = idx;
                             console.log(`✓ Found Equipment column at index ${idx}`);
                         }
                         
                         // Description column
-                        if (headerStr.includes('description') && descriptionColIdx === -1) {
+                        if ((headerStr.includes('description') ||
+                             headerStr.includes('desc') ||
+                             headerStr.includes('details')) && descriptionColIdx === -1) {
                             descriptionColIdx = idx;
                             console.log(`✓ Found Description column at index ${idx}`);
                         }
-                        
-                        // Quantity column - check multiple variations
-                        if ((headerStr.includes('order') || 
-                             headerStr.includes('qty') || 
-                             headerStr.includes('quantity') || 
-                             headerStr.includes('need')) && quantityColIdx === -1) {
-                            quantityColIdx = idx;
-                            console.log(`✓ Found Quantity column at index ${idx}`);
+                    }
+
+                    // Fallback if intelligent scan failed: use Row 0
+                    if (headerRowIdx === -1) {
+                        console.log('⚠️ Intelligent header scan failed, falling back to row 0');
+                        headerRowIdx = 0;
+                        headers = rawData[0];
+                        if (!headers || headers.length === 0) {
+                            showToast('❌ Could not read file headers', 'error');
+                            return;
                         }
-                    });
+
+                        // Try standard detection on row 0 again (just in case)
+                        headers.forEach((header, idx) => {
+                            if (!header) return;
+                            const headerStr = String(header).toLowerCase().trim();
+                            if ((headerStr.includes('equipment') || headerStr.includes('item') || headerStr.includes('product')) && equipmentColIdx === -1) equipmentColIdx = idx;
+                            if ((headerStr.includes('order') || headerStr.includes('qty') || headerStr.includes('quantity')) && quantityColIdx === -1) quantityColIdx = idx;
+                            if ((headerStr.includes('description') || headerStr.includes('desc')) && descriptionColIdx === -1) descriptionColIdx = idx;
+                        });
+                    }
 
                     console.log('Equipment column index:', equipmentColIdx);
                     console.log('Quantity column index:', quantityColIdx);
@@ -1840,16 +1881,27 @@
                     }
 
                     console.log(`SUCCESS: Using Equipment col ${equipmentColIdx}, Quantity col ${quantityColIdx}`);
+
+                    // Show debug info to user
+                    const eqColName = headers[equipmentColIdx] || 'Unknown';
+                    const qtyColName = headers[quantityColIdx] || 'Unknown';
+                    const descColName = descriptionColIdx !== -1 ? (headers[descriptionColIdx] || 'None') : 'None';
+
+                    showToast(`ℹ️ Using columns: Item="${eqColName}", Qty="${qtyColName}", Desc="${descColName}"`, 'info');
+
                     if (descriptionColIdx !== -1) {
                         console.log(`SUCCESS: Using Description col ${descriptionColIdx}`);
                     }
 
-                    // Extract equipment, descriptions, and quantities (skip header row)
+                    // Extract equipment, descriptions, and quantities (start after header row)
                     const quoteEquipment = {};
                     const quoteDescriptions = {};
                     let processedRows = 0;
 
-                    for (let i = 1; i < rawData.length; i++) {
+                    const startRow = headerRowIdx + 1;
+                    console.log(`Reading data starting from row ${startRow}`);
+
+                    for (let i = startRow; i < rawData.length; i++) {
                         const row = rawData[i];
                         if (!row || row.length === 0 || row.every(cell => !cell)) continue;
 
@@ -1909,67 +1961,286 @@
                     const unmatched = [];
                     let matchCount = 0;
 
-                    // Helper function to normalize equipment names for comparison
-                    const normalize = (str) => {
-                        return String(str)
-                            .toLowerCase()
-                            .trim()
-                            .replace(/[\s\-_]+/g, '')  // Remove spaces, hyphens, underscores
-                            .replace(/[^a-z0-9]/g, ''); // Keep only alphanumeric
+                    // ============================================
+                    // MATCHING LOGIC HELPERS
+                    // ============================================
+
+                    // Tokenizer: splits "Shure SM-58 (Mic)" -> ["shure", "sm", "58", "mic"]
+                    // AND splits "10ft" -> ["10", "ft"]
+                    const getTokens = (str) => {
+                        if (!str) return [];
+                        const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ');
+                        return clean.match(/[a-z]+|[0-9]+/g) || [];
+                    };
+                    const getTokens = (str) => String(str).toLowerCase().match(/[a-z0-9]+/g) || [];
+
+                    // Normalize: "Shure SM-58" -> "shuresm58"
+                    const normalize = (str) => String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+                    // Sorted Tokens: "Powered Speaker" -> "poweredspeaker" (same as "Speaker (Powered)")
+                    const normalizeSorted = (str) => getTokens(str).sort().join('');
+
+                    // Jaccard Similarity Index (0.0 to 1.0)
+                    const getJaccardScore = (setA, setB) => {
+                        if (setA.size === 0 || setB.size === 0) return 0;
+                        const intersection = new Set([...setA].filter(x => setB.has(x)));
+                        const union = new Set([...setA, ...setB]);
+                        return intersection.size / union.size;
                     };
 
-                    // Build normalized inventory lookup
-                    const normalizedInventory = {};
-                    availableEquipment.forEach(name => {
-                        const norm = normalize(name);
-                        if (!normalizedInventory[norm]) {
-                            normalizedInventory[norm] = name;
+                    // Pre-compute Inventory Indexes
+                    console.log('Building matching indexes...');
+                    const inventoryIndex = {
+                        normalized: {},
+                        sorted: {},
+                        tokens: [], // Array of { name, tokens: Set }
+                        descriptions: [] // Array of { name, desc, tokens: Set }
+                    };
+
+                    availableEquipment.forEach(item => {
+                        // Main indexes
+                        inventoryIndex.normalized[normalize(item)] = item;
+                        inventoryIndex.sorted[normalizeSorted(item)] = item;
+                        inventoryIndex.tokens.push({
+                            name: item,
+                            tokens: new Set(getTokens(item))
+                        });
+
+                        // Inventory Description Index (if available)
+                        if (parsedData.inventoryDescriptions && parsedData.inventoryDescriptions[item]) {
+                            const desc = parsedData.inventoryDescriptions[item];
+                            inventoryIndex.descriptions.push({
+                                name: item,
+                                desc: desc,
+                                tokens: new Set(getTokens(desc))
+                            });
                         }
                     });
 
+                    // Core Matching Function
+                    const findBestMatch = (query) => {
+                        if (!query) return null;
+
+                        // 1. Exact & Case-insensitive (handled outside)
+
+                        // 2. Normalized Match (Exact alphanumeric)
+                        const normQuery = normalize(query);
+                        if (inventoryIndex.normalized[normQuery]) {
+                            return { name: inventoryIndex.normalized[normQuery], method: 'normalized' };
+                        }
+
+                        // 3. Sorted Token Match (Word reordering)
+                        const sortedQuery = normalizeSorted(query);
+                        if (inventoryIndex.sorted[sortedQuery]) {
+                            return { name: inventoryIndex.sorted[sortedQuery], method: 'sorted_token' };
+                        }
+
+                        // 4. Substring Matching (High Confidence)
+                        if (query.length > 3) {
+                            const qLower = query.toLowerCase();
+                            // Check if Quote is substring of Inventory Name
+                            const container = availableEquipment.find(item => item.toLowerCase().includes(qLower));
+                            if (container) return { name: container, method: 'substring_inv_contains_quote' };
+
+                            // Check if Inventory Name is substring of Quote
+                            const contained = availableEquipment.find(item => qLower.includes(item.toLowerCase()));
+                            if (contained) return { name: contained, method: 'substring_quote_contains_inv' };
+                        }
+
+                        // 5. Fuzzy Token Overlap
+                        const queryTokens = new Set(getTokens(query));
+                        if (queryTokens.size === 0) return null;
+
+                        let bestFuzzy = null;
+                        let bestScore = 0;
+
+                        // Threshold: 0.4 means ~40% overlap (e.g. 2 words out of 5 match)
+                        const THRESHOLD = 0.4;
+
+                        for (const item of inventoryIndex.tokens) {
+                            const score = getJaccardScore(queryTokens, item.tokens);
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestFuzzy = item.name;
+                            }
+                        }
+
+                        if (bestScore >= THRESHOLD) {
+                            return { name: bestFuzzy, method: `fuzzy_${bestScore.toFixed(2)}` };
+                        }
+
+                        return null;
+                    };
+
+                    // Function to match Quote Name against Inventory DESCRIPTION
+                    const matchAgainstInventoryDescription = (query) => {
+                        if (!query || inventoryIndex.descriptions.length === 0) return null;
+                        const qLower = query.toLowerCase();
+
+                        // Try exact/contains on description
+                        for (const item of inventoryIndex.descriptions) {
+                            const descLower = item.desc.toLowerCase();
+                            if (descLower === qLower) return { name: item.name, method: 'inv_desc_exact' };
+                            if (descLower.includes(qLower)) return { name: item.name, method: 'inv_desc_contains_quote' };
+                            if (qLower.includes(descLower)) return { name: item.name, method: 'quote_contains_inv_desc' };
+                        }
+
+                        // Try fuzzy on description
+                        const queryTokens = new Set(getTokens(query));
+                        if (queryTokens.size === 0) return null;
+
+                        let bestFuzzy = null;
+                        let bestScore = 0;
+                        const THRESHOLD = 0.5; // Stricter for description match
+
+                        for (const item of inventoryIndex.descriptions) {
+                            const score = getJaccardScore(queryTokens, item.tokens);
+                            if (score > bestScore) {
+                                bestScore = score;
+                                bestFuzzy = item.name;
+                            }
+                        }
+
+                        if (bestScore >= THRESHOLD) {
+                            return { name: bestFuzzy, method: `inv_desc_fuzzy_${bestScore.toFixed(2)}` };
+                        }
+
+                        return null;
+                    };
+
+                    // ============================================
+                    // EXECUTE MATCHING
+                    // ============================================
+
+                    const matchStats = { exact: 0, case: 0, norm: 0, sorted: 0, substring: 0, fuzzy: 0, desc_fallback: 0, inv_desc: 0 };
+
                     Object.entries(quoteEquipment).forEach(([quoteName, qty]) => {
-                        // Try exact match first
+                        let matchedName = null;
+                        let method = null;
+
+                        // Strategy 1: Match Quote Name against Inventory Name
+
+                        // 1.1 Exact Match (Fastest)
                         if (availableEquipment.includes(quoteName)) {
-                            matched[quoteName] = qty;
-                            matchCount++;
-                            console.log(`✓ Exact match: "${quoteName}"`);
-                        } else {
-                            // Try case-insensitive match
+                            matchedName = quoteName;
+                            method = 'exact';
+                        }
+                        // 1.2 Case-Insensitive (Fast)
+                        else {
                             const caseMatch = availableEquipment.find(inv =>
                                 inv.toLowerCase() === quoteName.toLowerCase()
                             );
                             if (caseMatch) {
-                                matched[caseMatch] = qty;
-                                matchCount++;
-                                console.log(`✓ Case match: "${quoteName}" -> "${caseMatch}"`);
-                            } else {
-                                // Try normalized match (ignoring spaces, hyphens, case)
-                                const normQuote = normalize(quoteName);
-                                if (normalizedInventory[normQuote]) {
-                                    const invName = normalizedInventory[normQuote];
-                                    matched[invName] = qty;
-                                    matchCount++;
-                                    console.log(`✓ Normalized match: "${quoteName}" -> "${invName}"`);
-                                } else {
-                                    // Try partial match - quote name contains inventory name or vice versa
-                                    const partialMatch = availableEquipment.find(inv => {
-                                        const invNorm = normalize(inv);
-                                        return invNorm.includes(normQuote) || normQuote.includes(invNorm);
-                                    });
-                                    if (partialMatch) {
-                                        matched[partialMatch] = qty;
-                                        matchCount++;
-                                        console.log(`✓ Partial match: "${quoteName}" -> "${partialMatch}"`);
-                                    } else {
-                                        unmatched.push(quoteName);
-                                        console.log(`✗ No match: "${quoteName}" (normalized: "${normQuote}")`);
-                                    }
+                                matchedName = caseMatch;
+                                method = 'case';
+                            }
+                            // 1.3 Advanced Matching (Normalized / Sorted / Substring / Fuzzy)
+                            else {
+                                const result = findBestMatch(quoteName);
+                                if (result) {
+                                    matchedName = result.name;
+                                    method = result.method;
                                 }
                             }
                         }
+
+                        // Strategy 2: Match Quote Name against Inventory Description
+                        // (Useful if Quote uses Description but Inventory keys are Item Codes, and Inventory has Desc column)
+                        if (!matchedName) {
+                            const result = matchAgainstInventoryDescription(quoteName);
+                            if (result) {
+                                matchedName = result.name;
+                                method = result.method;
+                            }
+                        }
+
+                        // Strategy 3: Match Quote Description against Inventory Name
+                        // (Useful if Quote has "Item Code" in Name and "Real Name" in Description)
+                        if (!matchedName && quoteDescriptions[quoteName]) {
+                            const desc = quoteDescriptions[quoteName];
+
+                            // Try exact/case first
+                            const caseMatch = availableEquipment.find(inv =>
+                                inv.toLowerCase() === desc.toLowerCase()
+                            );
+
+                            if (caseMatch) {
+                                matchedName = caseMatch;
+                                method = 'desc_case';
+                            } else {
+                                const result = findBestMatch(desc);
+                                if (result) {
+                                    matchedName = result.name;
+                                    method = `desc_${result.method}`;
+                                }
+                            }
+                        } else {
+                            unmatched.push(quoteName);
+                        }
+
+                        if (matchedName) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+
+                            // Update stats
+                            if (method === 'exact') matchStats.exact++;
+                            else if (method === 'case') matchStats.case++;
+                            else if (method === 'normalized') matchStats.norm++;
+                            else if (method === 'sorted_token') matchStats.sorted++;
+                            else if (method.startsWith('substring')) matchStats.substring++;
+                            else if (method.startsWith('fuzzy')) matchStats.fuzzy++;
+                            else if (method.startsWith('desc')) matchStats.desc_fallback++;
+                            else if (method.startsWith('inv_desc') || method.startsWith('quote_contains')) matchStats.inv_desc++;
+
+                            // Log weird matches for debugging
+                            if (!method.startsWith('exact') && !method.startsWith('case')) {
+                                console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
+                            }
+                        } else {
+                            unmatched.push(quoteName);
+                        }
+
+                        // Strategy 4: Match Quote Description against Inventory Description
+                        // (Useful if both sides use Item Codes but Descriptions match)
+                        if (!matchedName && quoteDescriptions[quoteName]) {
+                            const desc = quoteDescriptions[quoteName];
+                            const result = matchAgainstInventoryDescription(desc);
+                            if (result) {
+                                matchedName = result.name;
+                                method = `desc_to_desc_${result.method}`;
+                            }
+                        }
+
+                        if (matchedName) {
+                            matched[matchedName] = qty;
+                            matchCount++;
+
+                            // Update stats
+                            if (method === 'exact') matchStats.exact++;
+                            else if (method === 'case') matchStats.case++;
+                            else if (method === 'normalized') matchStats.norm++;
+                            else if (method === 'sorted_token') matchStats.sorted++;
+                            else if (method.startsWith('substring')) matchStats.substring++;
+                            else if (method.startsWith('fuzzy')) matchStats.fuzzy++;
+                            else if (method.startsWith('desc')) matchStats.desc_fallback++;
+                            else if (method.startsWith('inv_desc') || method.startsWith('quote_contains')) matchStats.inv_desc++;
+                            else if (method.startsWith('desc_to_desc')) matchStats.inv_desc++;
+
+                            // Log weird matches for debugging
+                            if (!method.startsWith('exact') && !method.startsWith('case')) {
+                                console.log(`match: "${quoteName}" -> "${matchedName}" (${method})`);
+                            }
+                        } else {
+                            unmatched.push(quoteName);
+                        }
                     });
 
-                    console.log(`Matched ${matchCount} of ${Object.keys(quoteEquipment).length} items`);
+                    console.log(`Matched ${matchCount} items`);
+                    console.log('Match stats:', matchStats);
+
+                    // Show detailed toast about success rate
+                    const percent = Math.round((matchCount / Object.keys(quoteEquipment).length) * 100);
+                    showToast(`✅ Matched ${matchCount} items (${percent}%) | Desc Matches: ${matchStats.desc_fallback}`, 'success');
                     if (unmatched.length > 0) {
                         console.log('Unmatched items:', unmatched);
                     }
@@ -2200,7 +2471,7 @@
                     .map(([wh, qty]) => ({
                         warehouse: wh,
                         available: qty,
-                        distance: distances[wh] || 0,
+                        distance: distances[wh] !== undefined ? distances[wh] : 999999,
                         region: getWarehouseRegion(wh)
                     }));
 
