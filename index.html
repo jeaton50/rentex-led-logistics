@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Logistics Optimizer - Regional Equipment Management v2.0.3</title>
+    <title>Logistics Optimizer - Regional Equipment Management v2.0.4</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -693,8 +693,8 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-version="2.0.3-20260130">
-        // Version: 2.0.3 - Fixed missing descriptions for matched equipment
+    <script type="text/babel" data-version="2.0.4-20260130">
+        // Version: 2.0.4 - Fixed quantity column detection to prioritize "Ordered"
         // If you see "headerRowIdx === -1" in error, your browser has old cache!
         const { useState, useEffect, useRef, useCallback } = React;
 
@@ -1782,31 +1782,50 @@
 
                     headers.forEach((header, idx) => {
                         if (!header) return;
-                        
+
                         const headerStr = String(header).toLowerCase().trim();
                         console.log(`Column ${idx}: "${header}" -> "${headerStr}"`);
-                        
+
                         // Equipment column - check if it contains "equipment" anywhere
                         if (headerStr.includes('equipment') && equipmentColIdx === -1) {
                             equipmentColIdx = idx;
                             console.log(`✓ Found Equipment column at index ${idx}`);
                         }
-                        
+
                         // Description column
                         if (headerStr.includes('description') && descriptionColIdx === -1) {
                             descriptionColIdx = idx;
                             console.log(`✓ Found Description column at index ${idx}`);
                         }
-                        
-                        // Quantity column - check multiple variations
-                        if ((headerStr.includes('order') || 
-                             headerStr.includes('qty') || 
-                             headerStr.includes('quantity') || 
-                             headerStr.includes('need')) && quantityColIdx === -1) {
+
+                        // Quantity column - prioritize "ordered" over other qty columns
+                        // Check for "ordered" specifically first
+                        if (headerStr === 'ordered' && quantityColIdx === -1) {
                             quantityColIdx = idx;
-                            console.log(`✓ Found Quantity column at index ${idx}`);
+                            console.log(`✓ Found Quantity column (ordered) at index ${idx}`);
                         }
                     });
+
+                    // If "ordered" not found, try other quantity variations
+                    if (quantityColIdx === -1) {
+                        headers.forEach((header, idx) => {
+                            if (!header || quantityColIdx !== -1) return;
+
+                            const headerStr = String(header).toLowerCase().trim();
+
+                            // Skip "qty available" or "min avail qty" - we want ordered qty
+                            if (headerStr.includes('avail')) return;
+
+                            if (headerStr.includes('order') ||
+                                headerStr.includes('qty') ||
+                                headerStr.includes('quantity') ||
+                                headerStr.includes('need') ||
+                                headerStr.includes('request')) {
+                                quantityColIdx = idx;
+                                console.log(`✓ Found Quantity column (${headerStr}) at index ${idx}`);
+                            }
+                        });
+                    }
 
                     console.log('Equipment column index:', equipmentColIdx);
                     console.log('Quantity column index:', quantityColIdx);
