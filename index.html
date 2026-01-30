@@ -691,6 +691,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
+        // Version: 2.0.1 - Fixed MSAL initialization and improved error handling
         const { useState, useEffect, useRef, useCallback } = React;
 
         // ============================================
@@ -743,9 +744,19 @@
         // Dynamic MSAL initialization
         let msalInstance = null;
 
+        // Check if MSAL library is loaded
+        const isMsalAvailable = () => {
+            return typeof msal !== 'undefined' && msal.PublicClientApplication;
+        };
+
         const initializeMsal = (clientId, tenantId) => {
             if (!clientId || !tenantId) {
                 console.log('MSAL not initialized: missing clientId or tenantId');
+                return null;
+            }
+
+            if (!isMsalAvailable()) {
+                console.warn('MSAL library not loaded. SharePoint features will be disabled.');
                 return null;
             }
 
@@ -771,8 +782,8 @@
             }
         };
 
-        // Initialize MSAL if config exists
-        if (SHAREPOINT_CONFIG.clientId && SHAREPOINT_CONFIG.tenantId) {
+        // Initialize MSAL if config exists and library is loaded
+        if (isMsalAvailable() && SHAREPOINT_CONFIG.clientId && SHAREPOINT_CONFIG.tenantId) {
             msalInstance = initializeMsal(SHAREPOINT_CONFIG.clientId, SHAREPOINT_CONFIG.tenantId);
         }
 
@@ -4273,7 +4284,25 @@
             );
         };
 
-        ReactDOM.render(<LogisticsOptimizer />, document.getElementById('root'));
+        // Render the app with error handling
+        try {
+            ReactDOM.render(<LogisticsOptimizer />, document.getElementById('root'));
+        } catch (error) {
+            console.error('App initialization error:', error);
+            document.getElementById('root').innerHTML = `
+                <div style="padding: 2rem; background: #2C0A0A; color: white; font-family: monospace;">
+                    <h1 style="color: #FF5252;">⚠️ Application Error</h1>
+                    <p>The application failed to load. Please try:</p>
+                    <ol>
+                        <li>Hard refresh the page (Ctrl+Shift+R or Cmd+Shift+R)</li>
+                        <li>Clear browser cache</li>
+                        <li>Open in incognito/private window</li>
+                    </ol>
+                    <h3 style="margin-top: 1rem;">Error Details:</h3>
+                    <pre style="background: #1a1a1a; padding: 1rem; overflow: auto; border-radius: 8px;">${error.message}\n\n${error.stack}</pre>
+                </div>
+            `;
+        }
     </script>
 </body>
 </html>
