@@ -1943,7 +1943,9 @@
 
                     const availableEquipment = Object.keys(parsedData.inventory);
                     console.log(`Inventory has ${availableEquipment.length} items`);
-                    
+                    console.log('Sample inventory items:', availableEquipment.slice(0, 10));
+                    console.log('Sample quote items:', Object.keys(quoteEquipment).slice(0, 10));
+
                     const matched = {};
                     const unmatched = [];
                     let matchCount = 0;
@@ -2229,7 +2231,7 @@
                     const percent = Math.round((matchCount / Object.keys(quoteEquipment).length) * 100);
                     showToast(`✅ Matched ${matchCount} items (${percent}%) | Desc Matches: ${matchStats.desc_fallback}`, 'success');
                     if (unmatched.length > 0) {
-                        console.log('Unmatched items:', unmatched.slice(0, 10));
+                        console.log('Unmatched items:', unmatched);
                     }
                     console.log('=== QUOTE LOADER DEBUG END ===');
 
