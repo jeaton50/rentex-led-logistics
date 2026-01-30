@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Logistics Optimizer - Regional Equipment Management v2.0.4</title>
+    <title>Logistics Optimizer - Regional Equipment Management v2.0.5</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -693,8 +693,8 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-version="2.0.4-20260130">
-        // Version: 2.0.4 - Fixed quantity column detection to prioritize "Ordered"
+    <script type="text/babel" data-version="2.0.5-20260130">
+        // Version: 2.0.5 - Added detailed column detection debugging
         // If you see "headerRowIdx === -1" in error, your browser has old cache!
         const { useState, useEffect, useRef, useCallback } = React;
 
@@ -1767,8 +1767,9 @@
 
                     // The first row should be the header
                     const headers = rawData[0];
-                    console.log('Headers detected:', headers);
-                    console.log('Header types:', headers.map(h => typeof h));
+                    console.log('=== ALL HEADERS ===');
+                    headers.forEach((h, i) => console.log(`  Column ${i}: "${h}"`));
+                    console.log('==================');
 
                     if (!headers || headers.length === 0) {
                         showToast('❌ Could not read file headers', 'error');
@@ -1829,6 +1830,17 @@
 
                     console.log('Equipment column index:', equipmentColIdx);
                     console.log('Quantity column index:', quantityColIdx);
+                    console.log('Description column index:', descriptionColIdx);
+
+                    // Debug: Show first data row values
+                    if (rawData.length > 1) {
+                        const firstDataRow = rawData[1];
+                        console.log('=== FIRST DATA ROW DEBUG ===');
+                        console.log('Equipment value (col ' + equipmentColIdx + '):', firstDataRow[equipmentColIdx]);
+                        console.log('Quantity value (col ' + quantityColIdx + '):', firstDataRow[quantityColIdx]);
+                        console.log('Description value (col ' + descriptionColIdx + '):', firstDataRow[descriptionColIdx]);
+                        console.log('All columns in first row:', firstDataRow);
+                    }
 
                     // Fallback to positional columns based on typical format
                     if (equipmentColIdx === -1) {
