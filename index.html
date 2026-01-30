@@ -1827,7 +1827,7 @@
                             descriptionColIdx = idx;
                             console.log(`✓ Found Description column at index ${idx}`);
                         }
-                    }
+                    });
 
                     // Fallback if intelligent scan failed: use Row 0
                     if (headerRowIdx === -1) {
@@ -1976,7 +1976,6 @@
                         const clean = String(str).toLowerCase().replace(/[^a-z0-9]/g, ' ');
                         return clean.match(/[a-z]+|[0-9]+/g) || [];
                     };
-                    const getTokens = (str) => String(str).toLowerCase().match(/[a-z0-9]+/g) || [];
 
                     // Normalize: "Shure SM-58" -> "shuresm58"
                     const normalize = (str) => String(str).toLowerCase().replace(/[^a-z0-9]/g, '');
