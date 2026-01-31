@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Logistics Optimizer - Regional Equipment Management v2.0.6</title>
+    <title>Logistics Optimizer - Regional Equipment Management v2.0.7</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -693,8 +693,8 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-version="2.0.6-20260130">
-        // Version: 2.0.6 - Added row-by-row quantity debugging
+    <script type="text/babel" data-version="2.0.7-20260130">
+        // Version: 2.0.7 - Enhanced quote loading debug output
         // If you see "headerRowIdx === -1" in error, your browser has old cache!
         const { useState, useEffect, useRef, useCallback } = React;
 
@@ -1757,6 +1757,9 @@
             };
 
             const loadQuoteForOptimizer = async (file) => {
+                console.log('=== QUOTE LOADER CALLED ===');
+                console.log('File name:', file.name);
+
                 if (!excelData) {
                     showToast('⚠️ Please load inventory file first!', 'warning');
                     return;
@@ -1764,11 +1767,12 @@
 
                 try {
                     showToast('📋 Loading quote file...', 'success');
-                    
+
                     const data = await file.arrayBuffer();
                     const workbook = XLSX.read(data, { type: 'array' });
-                    
+
                     console.log('=== QUOTE LOADER DEBUG START ===');
+                    console.log('File:', file.name);
                     console.log('Available sheets:', workbook.SheetNames);
                     
                     // Look for 'Rental Items' sheet or use first sheet
@@ -2267,6 +2271,12 @@
                     if (unmatched.length > 0) {
                         console.log('Unmatched items:', unmatched);
                     }
+
+                    // Final summary - show exactly what will be used for optimization
+                    console.log('=== FINAL MATCHED QUANTITIES (will be used for optimization) ===');
+                    Object.entries(matched).forEach(([name, qty]) => {
+                        console.log(`  ${name}: ${qty}`);
+                    });
                     console.log('=== QUOTE LOADER DEBUG END ===');
 
                     setEquipmentFromQuote(matched);
