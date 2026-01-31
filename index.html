@@ -6,7 +6,7 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>Logistics Optimizer - Regional Equipment Management v2.0.5</title>
+    <title>Logistics Optimizer - Regional Equipment Management v2.0.6</title>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -693,8 +693,8 @@
 <body>
     <div id="root"></div>
 
-    <script type="text/babel" data-version="2.0.5-20260130">
-        // Version: 2.0.5 - Added detailed column detection debugging
+    <script type="text/babel" data-version="2.0.6-20260130">
+        // Version: 2.0.6 - Added row-by-row quantity debugging
         // If you see "headerRowIdx === -1" in error, your browser has old cache!
         const { useState, useEffect, useRef, useCallback } = React;
 
@@ -1896,7 +1896,7 @@
 
                         const equipmentStr = String(equipmentName).trim();
                         const descriptionStr = description ? String(description).trim() : '';
-                        
+
                         let qty = 0;
                         if (typeof qtyRaw === 'number') {
                             qty = Math.floor(Math.abs(qtyRaw));
@@ -1905,20 +1905,29 @@
                             qty = Math.floor(Math.abs(parseFloat(numStr) || 0));
                         }
 
+                        // Debug: Log EVERY row being processed
+                        console.log(`Row ${i}: Equipment="${equipmentStr}", RawQty="${qtyRaw}", ParsedQty=${qty}`);
+
                         if (equipmentStr && qty > 0) {
                             if (quoteEquipment[equipmentStr]) {
+                                const oldQty = quoteEquipment[equipmentStr];
                                 quoteEquipment[equipmentStr] += qty;
+                                console.log(`  -> DUPLICATE: "${equipmentStr}" was ${oldQty}, adding ${qty}, now ${quoteEquipment[equipmentStr]}`);
                             } else {
                                 quoteEquipment[equipmentStr] = qty;
-                                quoteDescriptions[equipmentStr] = descriptionStr; // Store description
+                                quoteDescriptions[equipmentStr] = descriptionStr;
+                                console.log(`  -> NEW: "${equipmentStr}" = ${qty}`);
                             }
                             processedRows++;
-                            
-                            if (processedRows <= 5) {
-                                console.log(`Row ${i}: "${equipmentStr}" -> ${qty} (${descriptionStr})`);
-                            }
                         }
                     }
+
+                    // Debug: Show final quantities for all items
+                    console.log('=== FINAL QUANTITIES ===');
+                    Object.entries(quoteEquipment).forEach(([name, qty]) => {
+                        console.log(`  ${name}: ${qty}`);
+                    });
+                    console.log('========================');
 
                     console.log(`Processed ${processedRows} rows`);
                     console.log('Unique equipment items:', Object.keys(quoteEquipment).length);
